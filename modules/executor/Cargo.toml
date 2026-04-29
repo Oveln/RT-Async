@@ -2,3 +2,9 @@
 name = "executor"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+cordyceps = "0.3.4"
+heapless = "0.9.2"
+portable-atomic = "1.13.1"
+critical-section ={ version = "1.2.0", features = ["restore-state-bool", "std"] }
