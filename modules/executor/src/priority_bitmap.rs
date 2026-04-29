@@ -59,7 +59,7 @@ impl<const NUM_GROUPS: usize> PriorityBitmap<NUM_GROUPS> {
         let b = self.group_table[g].trailing_zeros() as usize;
         Some(g * Self::GROUP_BITS + b)
     }
-    
+
     #[inline]
     pub fn is_set(&self, prio: usize) -> bool {
         debug_assert!(prio < Self::CAPACITY);
@@ -181,5 +181,184 @@ mod tests {
         for i in (0..64).step_by(7) {
             assert!(bm.is_set(i));
         }
+    }
+
+    #[test]
+    fn is_set_uninitialized() {
+        let bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in 0..64 {
+            assert!(!bm.is_set(i));
+        }
+    }
+
+    #[test]
+    fn set_all_64() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in 0..64 {
+            bm.set(i);
+        }
+        assert!(!bm.is_empty());
+        for i in 0..64 {
+            assert!(bm.is_set(i));
+        }
+        assert_eq!(bm.highest(), Some(0));
+        bm.clear(0);
+        assert_eq!(bm.highest(), Some(1));
+    }
+
+    #[test]
+    fn clear_all_64() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in 0..64 {
+            bm.set(i);
+        }
+        for i in 0..64 {
+            bm.clear(i);
+        }
+        assert!(bm.is_empty());
+        assert_eq!(bm.highest(), None);
+    }
+
+    #[test]
+    fn pop_highest_ascending_order() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in 0..64 {
+            bm.set(i);
+        }
+        for i in 0..64 {
+            assert_eq!(bm.pop_highest(), Some(i));
+        }
+        assert_eq!(bm.pop_highest(), None);
+        assert!(bm.is_empty());
+    }
+
+    #[test]
+    fn highest_descending_set() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in (0..64).rev() {
+            bm.set(i);
+        }
+        assert_eq!(bm.highest(), Some(0));
+    }
+
+    #[test]
+    fn set_and_clear_alternating() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        for i in 0..32 {
+            bm.set(i * 2);
+        }
+        for i in 0..32 {
+            assert!(bm.is_set(i * 2));
+            assert!(!bm.is_set(i * 2 + 1));
+        }
+        for i in 0..32 {
+            bm.clear(i * 2);
+        }
+        assert!(bm.is_empty());
+    }
+
+    #[test]
+    fn clear_middle_of_three() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        bm.set(10);
+        bm.set(20);
+        bm.set(30);
+        bm.clear(20);
+        assert!(!bm.is_set(20));
+        assert!(bm.is_set(10));
+        assert!(bm.is_set(30));
+        assert_eq!(bm.highest(), Some(10));
+    }
+
+    #[test]
+    fn re_set_after_clear() {
+        let mut bm: PriorityBitmap<1> = PriorityBitmap::new();
+        bm.set(5);
+        bm.clear(5);
+        assert!(bm.is_empty());
+        bm.set(5);
+        assert!(!bm.is_empty());
+        assert!(bm.is_set(5));
+        assert_eq!(bm.highest(), Some(5));
+    }
+
+    #[test]
+    fn multi_group_crossing() {
+        let mut bm: PriorityBitmap<4> = PriorityBitmap::new();
+        bm.set(63);
+        bm.set(64);
+        assert_eq!(bm.highest(), Some(63));
+        bm.clear(63);
+        assert_eq!(bm.highest(), Some(64));
+    }
+
+    #[test]
+    fn wide_drain_all_groups() {
+        let mut bm: PriorityBitmap<4> = PriorityBitmap::new();
+        bm.set(0);
+        bm.set(65);
+        bm.set(130);
+        bm.set(255);
+        assert_eq!(bm.pop_highest(), Some(0));
+        assert_eq!(bm.pop_highest(), Some(65));
+        assert_eq!(bm.pop_highest(), Some(130));
+        assert_eq!(bm.pop_highest(), Some(255));
+        assert_eq!(bm.pop_highest(), None);
+        assert!(bm.is_empty());
+    }
+
+    #[test]
+    fn clear_all_then_set() {
+        let mut bm: PriorityBitmap<2> = PriorityBitmap::new();
+        for i in 0..128 {
+            bm.set(i);
+        }
+        bm.clear_all();
+        assert!(bm.is_empty());
+        assert_eq!(bm.highest(), None);
+        bm.set(42);
+        assert_eq!(bm.highest(), Some(42));
+    }
+
+    #[test]
+    fn each_group_boundary() {
+        let mut bm: PriorityBitmap<4> = PriorityBitmap::new();
+        bm.set(0);
+        bm.set(63);
+        bm.set(64);
+        bm.set(127);
+        bm.set(128);
+        bm.set(191);
+        bm.set(192);
+        bm.set(255);
+        assert_eq!(bm.highest(), Some(0));
+        for prio in [0, 63, 64, 127, 128, 191, 192, 255] {
+            assert!(bm.is_set(prio));
+        }
+        bm.clear(0);
+        assert_eq!(bm.highest(), Some(63));
+        bm.clear(63);
+        assert_eq!(bm.highest(), Some(64));
+    }
+
+    #[test]
+    fn capacity_const() {
+        assert_eq!(PriorityBitmap::<1>::CAPACITY, 64);
+        assert_eq!(PriorityBitmap::<4>::CAPACITY, 256);
+        assert_eq!(PriorityBitmap::<64>::CAPACITY, 4096);
+    }
+
+    #[test]
+    fn is_empty_after_clear_all_with_multiple_groups() {
+        let mut bm: PriorityBitmap<4> = PriorityBitmap::new();
+        bm.set(1);
+        bm.set(100);
+        bm.set(200);
+        assert!(!bm.is_empty());
+        bm.clear_all();
+        assert!(bm.is_empty());
+        assert!(!bm.is_set(1));
+        assert!(!bm.is_set(100));
+        assert!(!bm.is_set(200));
     }
 }
