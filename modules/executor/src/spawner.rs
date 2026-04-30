@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub const fn ceil_div(a: usize, b: usize) -> usize {
-    (a + b - 1) / b
+    a.div_ceil(b)
 }
 
 type BitmapMutex<const G: usize> = critical_section::Mutex<UnsafeCell<PriorityBitmap<G>>>;
