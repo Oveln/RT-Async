@@ -1,0 +1,16 @@
+[package]
+name = "riscv64-rt"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "riscv64_rt"
+path = "src/lib.rs"
+
+[dependencies]
+riscv = { version = "0.16.0", default-features = false }
+
+[features]
+default = []
+clear_bss = []
