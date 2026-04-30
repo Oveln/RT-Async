@@ -7,4 +7,8 @@ edition = "2024"
 cordyceps = "0.3.4"
 heapless = "0.9.2"
 portable-atomic = "1.13.1"
-critical-section ={ version = "1.2.0", features = ["restore-state-bool", "std"] }
+critical-section = { version = "1.2.0", features = ["restore-state-bool"] }
+
+[features]
+# 运行测试时需启用 std feature，例如: cargo test --features std
+std = ["critical-section/std"]
