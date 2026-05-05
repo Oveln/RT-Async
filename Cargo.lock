@@ -182,8 +182,15 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 name = "platform"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "platform-traits",
+ "qemu-virt",
  "riscv64-rt",
 ]
+
+[[package]]
+name = "platform-traits"
+version = "0.1.0"
 
 [[package]]
 name = "portable-atomic"
@@ -198,6 +205,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "qemu-virt"
+version = "0.1.0"
+dependencies = [
+ "platform-traits",
 ]
 
 [[package]]
