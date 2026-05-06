@@ -4,9 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-riscv64-rt = { path = "archs/riscv64-rt" }
+riscv64-rt = { path = "archs/riscv64-rt", optional = true }
 platform-traits = { path = "../platform-traits" }
-qemu-virt = { path = "chips/qemu-virt" }
+qemu-virt = { path = "chips/qemu-virt", optional = true }
+std-chip = { path = "chips/std-chip", optional = true }
 log = { version = "0.4", default-features = false }
 
 [features]
+riscv64 = ["dep:riscv64-rt"]
+
+qemu-virt = ["riscv64", "dep:qemu-virt"]
+std = ["dep:std-chip"]

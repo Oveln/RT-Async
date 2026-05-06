@@ -1,0 +1,8 @@
+[package]
+name = "std-chip"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+platform-traits = { path = "../../../platform-traits" }

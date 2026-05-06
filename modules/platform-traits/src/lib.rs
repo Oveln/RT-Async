@@ -13,4 +13,7 @@ pub trait Chip {
 
     /// 通过串口输出字符串。
     fn put_str(s: &str);
+
+    /// 触发调度器软件中断。
+    unsafe fn pend();
 }

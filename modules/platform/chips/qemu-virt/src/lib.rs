@@ -10,13 +10,14 @@ use platform_traits::Chip;
 const UART_BASE: usize = 0x1000_0000;
 /// QEMU virt 关机寄存器基址（SiFive Test 设备）。
 const SIFIVE_TEST_BASE: usize = 0x100_000;
+/// CLINT msip 寄存器（hart 0）。
+const CLINT_MSIP: usize = 0x2000_000;
 
 /// QEMU virt 平台的 Chip 实现。
 pub struct QemuVirt;
 
 impl Chip for QemuVirt {
     fn shutdown() -> ! {
-        // 向 SiFive Test 设备写入 0x5555 触发 QEMU 正常退出
         unsafe {
             core::ptr::write_volatile(SIFIVE_TEST_BASE as *mut u32, 0x5555);
         }
@@ -26,9 +27,12 @@ impl Chip for QemuVirt {
     fn put_str(s: &str) {
         for &byte in s.as_bytes() {
             unsafe {
-                // THR（发送保持寄存器）偏移为 0
                 core::ptr::write_volatile(UART_BASE as *mut u8, byte);
             }
         }
+    }
+
+    unsafe fn pend() {
+        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 1) };
     }
 }
