@@ -38,10 +38,15 @@ impl State {
     /// if the task is already enqueued (common case on double-wake).
     /// Only calls `f` inside `critical_section::with` when the `STATE_RUN_QUEUED`
     /// flag was previously clear.
-    pub fn run_enqueue(&self, f: impl FnOnce(critical_section::CriticalSection)) {
+    /// Returns `true` if the task was actually enqueued (first enqueue),
+    /// `false` if it was already queued (skipped).
+    pub fn run_enqueue(&self, f: impl FnOnce(critical_section::CriticalSection)) -> bool {
         let prev = self.inner.fetch_or(STATE_RUN_QUEUED, Ordering::AcqRel);
         if prev & STATE_RUN_QUEUED == 0 {
             critical_section::with(f);
+            true
+        } else {
+            false
         }
     }
 

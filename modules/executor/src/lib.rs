@@ -46,6 +46,8 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
+pub use executor_macro::task;
+
 mod executor;
 pub mod priority;
 pub mod priority_bitmap;
