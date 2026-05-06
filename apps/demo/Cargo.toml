@@ -1,0 +1,22 @@
+[package]
+name = "demo"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+executor = { path = "../../modules/executor" }
+platform = { path = "../../modules/platform" }
+log = { version = "0.4", default-features = false }
+
+[features]
+std = ["platform/std"]
+qemu-virt = ["platform/qemu-virt"]
+
+[[bin]]
+name = "async_fn"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "manual_future"
+required-features = ["qemu-virt"]

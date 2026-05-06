@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_future_repolled() {
+    fn pending_future_wake_without_executor() {
         static POLLS: AtomicUsize = AtomicUsize::new(0);
         static TASK: TaskStorage<PendingOnce> = TaskStorage::new();
 
@@ -239,6 +239,8 @@ mod tests {
             let poll = (*task.info().poll_fn.get()).unwrap();
             poll(task);
         }
+        // Without an executor, wake_by_ref is a no-op (executor_ptr is null),
+        // so the future is polled exactly once and remains Pending.
         assert_eq!(POLLS.load(Ordering::Relaxed), 1);
     }
 
