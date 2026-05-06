@@ -37,9 +37,15 @@ pub(crate) struct BitmapOps {
 pub(crate) struct Executor {
     run_queue: RunQueue,
     priority: usize,
-    bitmap_ops: UnsafeCell<Option<BitmapOps>>,
+    bitmap_ops: UnsafeCell<BitmapOps>,
 }
 
+// SAFETY: Executor is shared across threads (ISR context). All interior
+// mutability goes through UnsafeCell fields with the following invariants:
+// - `bitmap_ops`: written once in `set_bitmap_ops` before any concurrent
+//   access (called from `Spawner::init` which runs before spawning). After
+//   init it is only read, so no data race.
+// - `run_queue`: protected by `critical_section::Mutex`.
 unsafe impl Sync for Executor {}
 
 impl Executor {
@@ -47,8 +53,16 @@ impl Executor {
         Self {
             run_queue: RunQueue::new(),
             priority,
-            bitmap_ops: UnsafeCell::new(None),
+            bitmap_ops: UnsafeCell::new(BitmapOps {
+                ptr: core::ptr::null_mut(),
+                set: Self::not_initialized,
+                clear: Self::not_initialized,
+            }),
         }
+    }
+
+    unsafe fn not_initialized(_: *mut (), _: usize, _: critical_section::CriticalSection) {
+        panic!("executor: bitmap ops not initialized, call Spawner::init first")
     }
 
     /// Install the bitmap operation callbacks.
@@ -58,8 +72,9 @@ impl Executor {
     ///
     /// [`Spawner::init`]: crate::spawner::Spawner::init
     pub(crate) fn set_bitmap_ops(&self, ops: BitmapOps) {
+        // SAFETY: Called once from Spawner::init before any concurrent access.
         unsafe {
-            *self.bitmap_ops.get() = Some(ops);
+            *self.bitmap_ops.get() = ops;
         }
     }
 
@@ -71,19 +86,24 @@ impl Executor {
     ///
     /// [`Spawner::try_preempt`]: crate::spawner::Spawner::try_preempt
     pub(crate) fn run(&self) {
+        log::trace!("executor[{}]: run start", self.priority);
+        let ops = unsafe { &*self.bitmap_ops.get() };
         loop {
             let task = locked(|cs| {
                 let task = self.run_queue.dequeue(cs);
                 if let Some(task) = task {
                     Some(task)
                 } else {
-                    if let Some(ops) = unsafe { &*self.bitmap_ops.get() } {
-                        unsafe { (ops.clear)(ops.ptr, self.priority, cs) };
-                    }
+                    unsafe { (ops.clear)(ops.ptr, self.priority, cs) };
                     None
                 }
             });
             if let Some(task) = task {
+                log::trace!(
+                    "executor[{}]: polling task {:p}",
+                    self.priority,
+                    task.info()
+                );
                 unsafe {
                     let poll = (*task.info().poll_fn.get()).unwrap();
                     poll(task)
@@ -92,6 +112,7 @@ impl Executor {
                 break;
             }
         }
+        log::trace!("executor[{}]: run end", self.priority);
     }
 
     /// Enqueue a task and signal the scheduler bitmap.
@@ -100,16 +121,21 @@ impl Executor {
     /// route back to this executor.  If this is the first enqueue since the
     /// queue was drained, sets this executor's bit in the priority bitmap
     /// (via [`BitmapOps::set`]).
-    pub(crate) unsafe fn enqueue(&self, task: TaskRef) {
+    /// Returns `true` if the task was actually enqueued.
+    pub(crate) unsafe fn enqueue(&self, task: TaskRef) -> bool {
+        let ops = unsafe { &*self.bitmap_ops.get() };
         task.info().state.run_enqueue(|cs| {
+            log::trace!(
+                "executor[{}]: enqueue task {:p}",
+                self.priority,
+                task.info()
+            );
             task.info()
                 .executor_ptr
                 .store(core::ptr::from_ref(self).cast_mut(), Ordering::Release);
             self.run_queue.enqueue(task, cs);
-            if let Some(ops) = unsafe { &*self.bitmap_ops.get() } {
-                unsafe { (ops.set)(ops.ptr, self.priority, cs) };
-            }
-        });
+            unsafe { (ops.set)(ops.ptr, self.priority, cs) };
+        })
     }
 }
 
@@ -118,6 +144,7 @@ impl Executor {
 /// Called from the waker vtable.  Loads the `executor_ptr` stored during
 /// [`Executor::enqueue`] and delegates to [`Executor::enqueue`].
 pub(crate) fn wake_task(task: TaskRef) {
+    log::trace!("wake: task {:p}", task.info());
     let executor_ptr = task.info().executor_ptr.load(Ordering::Acquire);
     if !executor_ptr.is_null() {
         unsafe { (*executor_ptr).enqueue(task) };
@@ -131,9 +158,21 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Waker};
 
-    use crate::executor::Executor;
+    use crate::executor::{BitmapOps, Executor};
     use crate::spawner::SpawnToken;
     use crate::task::storage::TaskStorage;
+
+    unsafe fn noop_bmp(_: *mut (), _: usize, _: critical_section::CriticalSection) {}
+
+    fn new_exec(priority: usize) -> Executor {
+        let exec = Executor::new(priority);
+        exec.set_bitmap_ops(BitmapOps {
+            ptr: core::ptr::null_mut(),
+            set: noop_bmp,
+            clear: noop_bmp,
+        });
+        exec
+    }
 
     fn enqueue<F>(exec: &Executor, token: SpawnToken<F>) {
         let task = token.task_ref;
@@ -144,7 +183,7 @@ mod tests {
     #[test]
     fn ready_future() {
         static TASK: TaskStorage<std::future::Ready<()>> = TaskStorage::new();
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK.spawn(|| std::future::ready(())).unwrap());
         exec.run();
     }
@@ -167,7 +206,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK.spawn(|| PendingOnce).unwrap());
         exec.run();
         assert_eq!(POLL_COUNT.load(Ordering::Relaxed), 2);
@@ -188,7 +227,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK_A.spawn(|| CountN).unwrap());
         enqueue(&exec, TASK_B.spawn(|| CountN).unwrap());
         exec.run();
@@ -197,7 +236,7 @@ mod tests {
 
     #[test]
     fn empty_run() {
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         exec.run();
     }
 
@@ -220,7 +259,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK.spawn(|| MultiPoll).unwrap());
         exec.run();
         assert_eq!(POLLS.load(Ordering::Relaxed), 5);
@@ -259,7 +298,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK_WAIT.spawn(|| WaitFut).unwrap());
         enqueue(&exec, TASK_SIGNAL.spawn(|| SignalFut).unwrap());
         exec.run();
@@ -280,7 +319,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         enqueue(&exec, TASK.spawn(|| NeverReady).unwrap());
         exec.run();
         assert!(POLLED.load(Ordering::Relaxed));
@@ -300,7 +339,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
 
         enqueue(&exec, TASK.spawn(|| CountOnce).unwrap());
         exec.run();
@@ -326,7 +365,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
 
         enqueue(&exec, TASK_A.spawn(|| CountRun).unwrap());
         exec.run();
@@ -358,7 +397,7 @@ mod tests {
             }
         }
 
-        let exec = Executor::new(0);
+        let exec = new_exec(0);
         for t in [&T0, &T1, &T2, &T3, &T4, &T5, &T6, &T7] {
             enqueue(&exec, t.spawn(|| Ct).unwrap());
         }

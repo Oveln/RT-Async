@@ -13,10 +13,6 @@ use crate::{
     task::TaskRef,
 };
 
-pub const fn ceil_div(a: usize, b: usize) -> usize {
-    a.div_ceil(b)
-}
-
 type BitmapMutex<const G: usize> = critical_section::Mutex<UnsafeCell<PriorityBitmap<G>>>;
 
 /// Opaque handle representing a spawned but not-yet-scheduled task.
@@ -67,10 +63,14 @@ impl RunToken {
 /// stack space, from oldest (bottom) to newest (top).  The executor at the
 /// top of the stack is the one currently running.
 ///
-/// Internally backed by a [`PriorityBitmap`] with `ceil(N / 64)` groups,
-/// wrapped in a [`critical_section::Mutex`] so that both the executors
-/// (from ISR/context) and [`try_preempt`](Self::try_preempt) access it
-/// safely without races.
+/// Internally backed by a [`PriorityBitmap`] with a fixed 64 groups (4096
+/// bits), wrapped in a [`critical_section::Mutex`] so that both the
+/// executors (from ISR/context) and [`try_preempt`](Self::try_preempt)
+/// access it safely without races.
+///
+/// The bitmap is always 64 groups regardless of `N` to avoid const-generic
+/// `where` bounds that complicate the public API.  For small `N` this wastes
+/// some memory (~512 bytes) in exchange for a cleaner type signature.
 ///
 /// # Initialization
 ///
@@ -87,34 +87,29 @@ impl RunToken {
 /// ```
 ///
 /// [`BitmapOps`]: crate::executor::BitmapOps
-pub struct Spawner<const N: usize>
-where
-    [(); ceil_div(N, 64)]:,
-{
+pub struct Spawner<const N: usize> {
     executors: [Executor; N],
-    bitmap: BitmapMutex<{ ceil_div(N, 64) }>,
+    bitmap: BitmapMutex<64>,
     prio_stack: critical_section::Mutex<UnsafeCell<Vec<Priority, N>>>,
+    pend: UnsafeCell<unsafe fn()>,
     _pinned: PhantomPinned,
 }
 
-impl<const N: usize> Spawner<N>
-where
-    [(); ceil_div(N, 64)]:,
-{
-    const GROUPS: usize = ceil_div(N, 64);
-    const _ASSERT_N_IN_RANGE: () = assert!(
-        N > 0 && Self::GROUPS <= 64,
-        "Spawner<N>: N must be in 1..=4096"
-    );
+impl<const N: usize> Spawner<N> {
+    const _ASSERT_N_IN_RANGE: () = assert!(N > 0 && N <= 4096, "Spawner<N>: N must be in 1..=4096");
 
     unsafe fn bm_set(ctx: *mut (), prio: usize, cs: critical_section::CriticalSection) {
-        let mutex = unsafe { &*(ctx as *const BitmapMutex<{ ceil_div(N, 64) }>) };
+        let mutex = unsafe { &*(ctx as *const BitmapMutex<64>) };
         unsafe { (*mutex.borrow(cs).get()).set(prio) };
     }
 
     unsafe fn bm_clear(ctx: *mut (), prio: usize, cs: critical_section::CriticalSection) {
-        let mutex = unsafe { &*(ctx as *const BitmapMutex<{ ceil_div(N, 64) }>) };
+        let mutex = unsafe { &*(ctx as *const BitmapMutex<64>) };
         unsafe { (*mutex.borrow(cs).get()).clear(prio) };
+    }
+
+    unsafe fn noop_pend() {
+        panic!("spawner: pend not initialized, call Spawner::init first")
     }
 
     pub fn new() -> Self {
@@ -123,6 +118,7 @@ where
             executors: core::array::from_fn(Executor::new),
             bitmap: critical_section::Mutex::new(UnsafeCell::new(PriorityBitmap::new())),
             prio_stack: critical_section::Mutex::new(UnsafeCell::new(Vec::new())),
+            pend: UnsafeCell::new(Self::noop_pend),
             _pinned: PhantomPinned,
         }
     }
@@ -133,6 +129,10 @@ where
     /// bitmap and monomorphised `set`/`clear` function pointers, then injects
     /// them into every executor.  Must be called exactly once after pinning.
     ///
+    /// `pend` is a platform-specific callback that triggers a scheduler
+    /// software interrupt, called when a higher-priority task is spawned
+    /// while a lower-priority executor is running.
+    ///
     /// # Safety context
     ///
     /// The `Pin` guarantee ensures the bitmap's address remains stable for
@@ -140,8 +140,9 @@ where
     /// [`BitmapOps`] is always valid.
     ///
     /// [`BitmapOps`]: crate::executor::BitmapOps
-    pub fn init(self: Pin<&mut Self>) {
+    pub fn init(self: Pin<&mut Self>, pend: unsafe fn()) {
         let this = unsafe { self.get_unchecked_mut() };
+        unsafe { *this.pend.get() = pend };
         let ctx = core::ptr::from_ref(&this.bitmap) as *mut ();
         for exec in &this.executors {
             exec.set_bitmap_ops(BitmapOps {
@@ -162,9 +163,31 @@ where
             .get(prio.to_usize())
             .expect("priority out of range");
         let task = token.task_ref;
+        log::debug!(
+            "spawner: spawn task {:p} at prio {}",
+            task.info(),
+            prio.to_usize()
+        );
         core::mem::forget(token);
-        unsafe {
-            executor.enqueue(task);
+        let enqueued = unsafe { executor.enqueue(task) };
+        if enqueued {
+            critical_section::with(|cs| {
+                let highest_prio = unsafe { self.bitmap.borrow(cs).as_ref_unchecked().highest() };
+                let highest_prio = match highest_prio {
+                    Some(p) => p,
+                    None => return,
+                };
+                let now_prio = unsafe { self.prio_stack.borrow(cs).as_ref_unchecked().last() };
+                let should_pend = match now_prio {
+                    None => true,
+                    Some(p) => Priority::new(highest_prio).is_higher_than(p),
+                };
+                if should_pend {
+                    unsafe {
+                        (*self.pend.get())();
+                    }
+                }
+            })
         }
     }
 
@@ -186,10 +209,19 @@ where
             let highest = Priority::new(highest_prio);
             match stack.last().copied() {
                 None => {
+                    log::debug!(
+                        "spawner: preempt -> prio {} (stack empty)",
+                        highest.to_usize()
+                    );
                     stack.push(highest).ok()?;
                     Some(RunToken::new(highest))
                 }
                 Some(p) if p.is_lower_than(&highest) => {
+                    log::debug!(
+                        "spawner: preempt -> prio {} (preempting prio {})",
+                        highest.to_usize(),
+                        p.to_usize()
+                    );
                     stack.push(highest).ok()?;
                     Some(RunToken::new(highest))
                 }
@@ -215,7 +247,9 @@ where
     pub fn complete_executor(self: Pin<&Self>) {
         critical_section::with(|cs| {
             let stack = unsafe { self.prio_stack.borrow(cs).as_mut_unchecked() };
-            stack.pop();
+            if let Some(p) = stack.pop() {
+                log::debug!("spawner: complete prio {}", p.to_usize());
+            }
         });
     }
 }
@@ -233,9 +267,10 @@ mod tests {
 
     macro_rules! pinned_spawner {
         ($name:ident, $n:expr) => {
+            unsafe fn noop() {}
             let $name = Spawner::<$n>::new();
             let mut $name = core::pin::pin!($name);
-            $name.as_mut().init();
+            $name.as_mut().init(noop);
             let $name = $name;
         };
     }
