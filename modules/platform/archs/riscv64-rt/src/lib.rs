@@ -22,8 +22,30 @@ mod handlers;
 mod start;
 mod panic;
 
-pub use trap::{TrapFrame, CONTEXT_STACK_SIZE, __trap_entry, trap_handler};
+pub use trap::TrapFrame;
+#[doc(hidden)]
+pub use trap::{CONTEXT_STACK_SIZE, __trap_entry, trap_handler};
 
+/// Enable global machine interrupts (sets mstatus.MIE).
+pub unsafe fn enable_interrupts() {
+    unsafe { riscv::register::mstatus::set_mie() };
+}
+
+/// Disable global machine interrupts (clears mstatus.MIE).
+pub unsafe fn disable_interrupts() {
+    unsafe { riscv::register::mstatus::clear_mie() };
+}
+
+/// Enable machine software interrupt (sets mie.MSIE).
+pub unsafe fn enable_msi() {
+    unsafe { riscv::register::mie::set_msoft() };
+}
+
+pub fn idle() {
+    riscv::asm::wfi();
+}
+
+#[doc(hidden)]
 #[no_mangle]
 pub extern "C" fn _default_abort() -> ! {
     loop {
@@ -31,6 +53,7 @@ pub extern "C" fn _default_abort() -> ! {
     }
 }
 
+#[doc(hidden)]
 #[no_mangle]
 pub extern "C" fn _default_start_trap() -> ! {
     loop {
@@ -38,5 +61,6 @@ pub extern "C" fn _default_start_trap() -> ! {
     }
 }
 
+#[doc(hidden)]
 #[no_mangle]
 pub extern "C" fn _default_setup_interrupts() {}

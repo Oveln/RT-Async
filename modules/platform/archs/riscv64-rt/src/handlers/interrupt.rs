@@ -14,8 +14,7 @@ extern "C" {
     fn MachineExternal(trap_frame: &mut TrapFrame);
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn dispatch(trap_frame: &mut TrapFrame, code: usize) {
+pub unsafe extern "C" fn dispatch_interrupt(trap_frame: &mut TrapFrame, code: usize) {
     let interrupt = Interrupt::from_number(code)
         .unwrap_or_else(|_| panic!("Unhandled interrupt: code={:#x}", code));
     match interrupt {

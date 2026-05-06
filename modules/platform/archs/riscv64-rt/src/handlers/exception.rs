@@ -45,8 +45,7 @@ pub unsafe extern "C" fn ExceptionHandler(trap_frame: &mut TrapFrame) {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn dispatch(trap_frame: &mut TrapFrame, code: usize) {
+pub unsafe extern "C" fn dispatch_exception(trap_frame: &mut TrapFrame, code: usize) {
     match Exception::from_number(code)
         .unwrap_or_else(|_| panic!("Unknown exception code: {code:#x}"))
     {
