@@ -20,3 +20,7 @@ required-features = ["qemu-virt"]
 [[bin]]
 name = "manual_future"
 required-features = ["qemu-virt"]
+
+[[bin]]
+name = "preempt_test"
+required-features = ["qemu-virt"]

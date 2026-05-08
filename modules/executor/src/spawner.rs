@@ -95,6 +95,14 @@ pub struct Spawner<const N: usize> {
     _pinned: PhantomPinned,
 }
 
+// SAFETY: All interior mutability in Spawner is protected:
+// - `executors` — each Executor impls Sync; run_queue under critical_section, bitmap_ops
+//   written once in init then read-only.
+// - `bitmap` / `prio_stack` — wrapped in `critical_section::Mutex`.
+// - `pend` — written once in `init()` (exclusive `Pin<&mut Self>`) before any `spawn()`,
+//   read only inside critical sections thereafter.
+unsafe impl<const N: usize> Sync for Spawner<N> {}
+
 impl<const N: usize> Spawner<N> {
     const _ASSERT_N_IN_RANGE: () = assert!(N > 0 && N <= 4096, "Spawner<N>: N must be in 1..=4096");
 
