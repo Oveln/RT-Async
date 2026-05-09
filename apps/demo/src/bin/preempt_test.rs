@@ -1,3 +1,13 @@
+//! 演示基于优先级的抢占调度
+//!
+//! 三个不同优先级的任务验证抢占行为：
+//! - `low_prio_task`(优先级 2)：运行中 spawn 更高优先级任务，触发立即抢占
+//! - `mid_prio_task`(优先级 1)：验证中间优先级任务的正确调度
+//! - `high_prio_task`(优先级 0)：高优先级任务抢占低优先级任务执行
+//!
+//! 辅助函数 `yield_n` 让任务主动 yield 指定次数，观察调度器在不同
+//! 优先级之间的切换顺序。
+
 #![no_std]
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
@@ -94,7 +104,7 @@ pub unsafe extern "C" fn __rust_main() -> ! {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn MachineSoft(_trap_frame: &mut TrapFrame) {
     unsafe {
-        core::ptr::write_volatile(0x2000000usize as *mut u32, 0);
+        platform::clear_pend();
 
         let spawner = Pin::new_unchecked(&*core::ptr::addr_of!(SPAWNER).cast::<Spawner<4>>());
 

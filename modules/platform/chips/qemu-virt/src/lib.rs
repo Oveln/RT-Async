@@ -35,4 +35,8 @@ impl Chip for QemuVirt {
     unsafe fn pend() {
         unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 1) };
     }
+
+    unsafe fn clear_pend() {
+        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 0) };
+    }
 }

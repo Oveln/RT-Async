@@ -1,3 +1,10 @@
+//! 演示手动实现 `Future` trait
+//!
+//! 包含两个手写 Future：
+//! - `CountTask`：立即完成的简单任务，演示最基础的 poll 语义
+//! - `YieldTwice`：通过 `wake_by_ref()` 让自身挂起并重新调度两次，
+//!   展示 Pending → wake → re-poll 的完整异步生命周期
+
 #![no_std]
 #![no_main]
 

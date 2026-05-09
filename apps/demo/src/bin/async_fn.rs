@@ -1,3 +1,9 @@
+//! 演示 async fn 任务的手动 spawn 流程
+//!
+//! 展示如何在不使用宏的情况下，手动将 async fn 包装为 `SpawnToken`
+//! 并通过 `Spawner` 调度执行。task1 使用手工展开的 `TaskTrait` 模式，
+//! task2 使用 `#[executor::task]` 宏作为对比。
+
 #![no_std]
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
@@ -63,8 +69,7 @@ pub unsafe extern "C" fn __rust_main() -> ! {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn MachineSoft(_trap_frame: &mut TrapFrame) {
     unsafe {
-        // Clear MSI before processing to prevent re-trigger
-        core::ptr::write_volatile(0x2000000usize as *mut u32, 0);
+        platform::clear_pend();
 
         let spawner = Pin::new_unchecked(&*core::ptr::addr_of!(SPAWNER).cast::<Spawner<4>>());
 

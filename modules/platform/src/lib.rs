@@ -37,7 +37,23 @@ pub unsafe fn start() {
     }
 }
 
+/// 系统调度器 pend 标记。
+///
+/// `pend()` 触发 MSI 前置为 true，`MachineSoft` ISR 据此区分
+/// 系统调度触发与外部 MSI 触发。
+pub static PEND_MARKER: portable_atomic::AtomicBool = portable_atomic::AtomicBool::new(false);
+
 /// 触发调度器软件中断。
 pub unsafe fn pend() {
+    PEND_MARKER.store(true, portable_atomic::Ordering::Release);
     unsafe { ChipImpl::pend() };
+}
+
+/// 清除调度器软件中断挂起标志，并返回 PEND_MARKER 的先前值。
+///
+/// 返回 `true` 表示本次 MSI 由调度器 `pend()` 触发，`false` 表示外部触发。
+pub unsafe fn clear_pend() -> bool {
+    let is_system = PEND_MARKER.swap(false, portable_atomic::Ordering::AcqRel);
+    unsafe { ChipImpl::clear_pend() };
+    is_system
 }

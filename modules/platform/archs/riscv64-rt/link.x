@@ -41,7 +41,7 @@ PROVIDE(LoadPageFault = ExceptionHandler);
 PROVIDE(StorePageFault = ExceptionHandler);
 
 PROVIDE(SupervisorSoft = DefaultHandler);
-PROVIDE(MachineSoft = DefaultHandler);
+PROVIDE(__Inner_MachineSoft = DefaultHandler);
 PROVIDE(SupervisorTimer = DefaultHandler);
 PROVIDE(MachineTimer = DefaultHandler);
 PROVIDE(SupervisorExternal = DefaultHandler);

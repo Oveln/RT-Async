@@ -11,6 +11,7 @@ impl platform_traits::Chip for StdChip {
         print!("{}",s);
     }
 
-    unsafe fn pend() {
-    }
+    unsafe fn pend() {}
+
+    unsafe fn clear_pend() {}
 }

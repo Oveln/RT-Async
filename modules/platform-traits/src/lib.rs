@@ -16,4 +16,7 @@ pub trait Chip {
 
     /// 触发调度器软件中断。
     unsafe fn pend();
+
+    /// 清除调度器软件中断挂起标志。
+    unsafe fn clear_pend();
 }

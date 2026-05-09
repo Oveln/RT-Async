@@ -9,6 +9,7 @@ platform-traits = { path = "../platform-traits" }
 qemu-virt = { path = "chips/qemu-virt", optional = true }
 std-chip = { path = "chips/std-chip", optional = true }
 log = { version = "0.4", default-features = false }
+portable-atomic = { version = "1", default-features = false }
 
 [features]
 riscv64 = ["dep:riscv64-rt"]

@@ -18,6 +18,10 @@ name = "async_fn"
 required-features = ["qemu-virt"]
 
 [[bin]]
+name = "async_fn_macro"
+required-features = ["qemu-virt"]
+
+[[bin]]
 name = "manual_future"
 required-features = ["qemu-virt"]
 
