@@ -73,3 +73,26 @@ pend_isr:                          // 硬件进入 MIE=0
 - **零额外栈切换开销** — executor 切换复用 Rust 的函数调用/返回语义，不经汇编上下文切换
 - **最多 4,096 个优先级** — `PriorityBitmap<G>` 支持 G ∈ [1, 64]，每组 64 个优先级
 - **O(1) 就绪选择** — 两级位图 `trailing_zeros()` 常数时间找到最高优先级的 executor
+
+## 测试
+
+测试基于 QEMU (`riscv64imac-unknown-none-elf` target，`qemu-virt` feature) 在本地运行，无需硬件。
+
+### 运行方式
+
+```bash
+# 运行全部集成测试
+make test
+
+# 运行指定测试
+make test smoke
+make test preempt_spawn
+```
+
+每个测试输出 `PASS` 或 `FAIL`，失败时自动打印日志。
+
+### 集成测试
+
+位于 `apps/test/src/bin/`，以独立 bin 形式在 QEMU 上执行
+
+公共测试工具（`apps/test/src/lib.rs`）：`record()` 记录事件，`assert_log()` 验证执行顺序，`fail()` 触发 QEMU 退出码 1。
