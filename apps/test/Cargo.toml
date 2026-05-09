@@ -5,6 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+executor = { path = "../../modules/executor" }
 platform = { path = "../../modules/platform" }
 log = { version = "0.4", default-features = false }
 
@@ -13,4 +14,32 @@ qemu-virt = ["platform/qemu-virt"]
 
 [[bin]]
 name = "smoke"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "single_task"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "fifo_same_prio"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "priority_order"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "yield_interleave"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "preempt_spawn"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "nested_preempt"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "preempt_spawn_chain"
 required-features = ["qemu-virt"]
