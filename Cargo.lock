@@ -93,6 +93,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "fugit"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04ae150b98ef345142101da0a0b4ccfcc577bc8f5b9778b852e9427c667654d3"
+dependencies = [
+ "gcd",
+]
+
+[[package]]
+name = "futures"
+version = "0.1.0"
+dependencies = [
+ "fugit",
+ "platform",
+ "timer",
+]
+
+[[package]]
+name = "gcd"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d758ba1b47b00caf47f24925c0074ecb20d6dfcffe7f6d53395c0465674841a"
+
+[[package]]
 name = "generator"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -363,6 +387,8 @@ name = "test"
 version = "0.1.0"
 dependencies = [
  "executor",
+ "fugit",
+ "futures",
  "log",
  "platform",
 ]
@@ -374,6 +400,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "timer"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "heapless",
 ]
 
 [[package]]

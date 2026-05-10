@@ -1,0 +1,9 @@
+//! Async primitives for rt-async.
+//!
+//! The [`timer`] module provides an async sleep API backed by the platform's
+//! [`TimerChip`] implementation.
+
+#![no_std]
+#![feature(generic_const_exprs)]
+
+pub mod timer;

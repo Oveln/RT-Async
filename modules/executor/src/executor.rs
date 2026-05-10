@@ -147,7 +147,7 @@ pub(crate) fn wake_task(task: TaskRef) {
     log::trace!("wake: task {:p}", task.info());
     let executor_ptr = task.info().executor_ptr.load(Ordering::Acquire);
     if !executor_ptr.is_null() {
-        unsafe { (*executor_ptr).enqueue(task) };
+        unsafe { if (*executor_ptr).enqueue(task) { platform::pend(); } };
     }
 }
 

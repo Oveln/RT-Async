@@ -1,0 +1,10 @@
+[package]
+name = "futures"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+platform = { path = "../platform" }
+timer = { path = "../timer" }
+fugit = "0.4"

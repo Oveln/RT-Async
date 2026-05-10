@@ -48,7 +48,9 @@ impl Chip for QemuVirt {
 /// QEMU virt 定时器频率：10 MHz。
 const QEMU_VIRT_FREQ_HZ: u32 = 10_000_000;
 
-impl TimerChip<QEMU_VIRT_FREQ_HZ> for QemuVirt {
+impl TimerChip for QemuVirt {
+    const FREQ_HZ: u32 = QEMU_VIRT_FREQ_HZ;
+
     fn now_ticks() -> u64 {
         unsafe { core::ptr::read_volatile(CLINT_MTIME as *const u64) }
     }

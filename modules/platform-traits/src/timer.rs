@@ -4,14 +4,13 @@
 //! and an absolute-deadline compare register used by the executor's
 //! timer queue.
 //!
-//! The const generic `FREQ_HZ` encodes the tick frequency at compile
-//! time, matching fugit's fraction representation:
+//! The associated constant [`TimerChip::FREQ_HZ`] encodes the tick frequency,
+//! matching fugit's fraction representation:
 //!
 //! ```ignore
 //! // QEMU virt at 10 MHz
 //! use fugit::Duration;
-//! type Dur = Duration<u64, 1, 10_000_000>;
-//! //            tick type ──┘  └── FREQ_HZ
+//! // Duration<u64, 1, 10_000_000> — FREQ_HZ is the denominator
 //! ```
 //!
 //! # RISC-V (CLINT)
@@ -26,11 +25,12 @@
 
 /// Platform timer interface.
 ///
-/// `FREQ_HZ` is the tick frequency in Hz, known at compile time.
-///
 /// All methods are static (no `&self`) so they can be stored as plain
 /// function pointers and called from ISR context.
-pub trait TimerChip<const FREQ_HZ: u32> {
+pub trait TimerChip {
+    /// Tick frequency in Hz, known at compile time.
+    const FREQ_HZ: u32;
+
     /// Read the current tick count (monotonic).
     fn now_ticks() -> u64;
 

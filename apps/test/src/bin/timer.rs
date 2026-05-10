@@ -14,18 +14,15 @@ use platform::{ChipImpl, idle};
 use platform::platform_traits::Chip;
 use platform::timer::TimerChip;
 
-const FREQ_HZ: u32 = 10_000_000;
-const TICKS_PER_MS: u64 = FREQ_HZ as u64 / 1_000;
-
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
 static ISR_TICK: AtomicU64 = AtomicU64::new(0);
 
 #[executor::interrupt]
 fn MachineTimer(_tf: &mut platform::arch::TrapFrame) {
-    let now = <platform::ChipImpl as TimerChip<FREQ_HZ>>::now_ticks();
+    let now = ChipImpl::now_ticks();
     ISR_TICK.store(now, Ordering::Relaxed);
     TIMER_FIRED.store(true, Ordering::Relaxed);
-    <platform::ChipImpl as TimerChip<FREQ_HZ>>::set_deadline(u64::MAX);
+    ChipImpl::set_deadline(u64::MAX);
 }
 
 #[unsafe(no_mangle)]
@@ -36,8 +33,8 @@ pub unsafe extern "C" fn __rust_main() {
     platform::init();
 
     // 测试 1: now_ticks() 单调递增
-    let t0 = <platform::ChipImpl as TimerChip<FREQ_HZ>>::now_ticks();
-    let t1 = <platform::ChipImpl as TimerChip<FREQ_HZ>>::now_ticks();
+    let t0 = ChipImpl::now_ticks();
+    let t1 = ChipImpl::now_ticks();
     if t1 < t0 {
         ChipImpl::put_str("FAIL: now_ticks not monotonic\n");
         unsafe { core::ptr::write_volatile(0x100_000 as *mut u32, 0x3333 | (1 << 16)) };
@@ -46,9 +43,10 @@ pub unsafe extern "C" fn __rust_main() {
 
     // 测试 2: set_deadline 触发中断
     // 先设 deadline 再开中断，避免 mtimecmp 初始值导致立即触发。
-    let deadline = <platform::ChipImpl as TimerChip<FREQ_HZ>>::now_ticks() + TICKS_PER_MS;
-    <platform::ChipImpl as TimerChip<FREQ_HZ>>::set_deadline(deadline);
-    unsafe { <platform::ChipImpl as TimerChip<FREQ_HZ>>::enable_irq() };
+    let ticks_per_ms = ChipImpl::FREQ_HZ as u64 / 1_000;
+    let deadline = ChipImpl::now_ticks() + ticks_per_ms;
+    ChipImpl::set_deadline(deadline);
+    unsafe { ChipImpl::enable_irq() };
     unsafe { platform::arch::enable_interrupts() };
 
     // wfi 等待中断唤醒。
