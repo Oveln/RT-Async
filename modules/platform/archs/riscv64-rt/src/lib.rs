@@ -17,14 +17,14 @@
 
 #![no_std]
 
-mod trap;
 mod handlers;
-mod start;
 mod panic;
+mod start;
+mod trap;
 
 pub use trap::TrapFrame;
 #[doc(hidden)]
-pub use trap::{CONTEXT_STACK_SIZE, __trap_entry, trap_handler};
+pub use trap::{__trap_entry, trap_handler, CONTEXT_STACK_SIZE};
 
 /// Enable global machine interrupts (sets mstatus.MIE).
 pub unsafe fn enable_interrupts() {

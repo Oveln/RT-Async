@@ -46,9 +46,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_const_exprs)]
 
-pub use executor_macro::task;
-pub use executor_macro::main;
 pub use executor_macro::interrupt;
+pub use executor_macro::main;
+pub use executor_macro::task;
 
 mod executor;
 pub mod priority;

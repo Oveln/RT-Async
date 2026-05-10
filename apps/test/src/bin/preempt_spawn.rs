@@ -12,14 +12,20 @@ use platform::platform_traits::Chip;
 
 #[executor::task]
 async fn task_high() {
-    unsafe { test::record("high"); }
+    unsafe {
+        test::record("high");
+    }
 }
 
 #[executor::task]
 async fn task_low(spawner: Pin<&'static Spawner<4>>) {
-    unsafe { test::record("low_start"); }
+    unsafe {
+        test::record("low_start");
+    }
     spawner.spawn(Priority::new(0), task_high().unwrap());
-    unsafe { test::record("low_end"); }
+    unsafe {
+        test::record("low_end");
+    }
 
     test::assert_log(&["low_start", "high", "low_end"]);
     platform::ChipImpl::shutdown();

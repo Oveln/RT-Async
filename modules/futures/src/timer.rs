@@ -23,8 +23,8 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
 use fugit::Duration;
-use platform::platform_traits::timer::TimerChip;
 use platform::ChipImpl;
+use platform::platform_traits::timer::TimerChip;
 
 /// Global timer queue (capacity 8).
 pub static TIMER_QUEUE: ::timer::TimerQueue<8> = ::timer::TimerQueue::new();
@@ -43,8 +43,7 @@ pub type TimerDuration = Duration<u64, 1, { ChipImpl::FREQ_HZ as u64 }>;
 /// timer::after(500.micros()).await;
 /// ```
 pub fn after(duration: Duration<u64, 1, { ChipImpl::FREQ_HZ as u64 }>) -> TimerDelay {
-    let ticks: u64 = duration
-        .as_ticks();
+    let ticks: u64 = duration.as_ticks();
     let deadline = ChipImpl::now_ticks().saturating_add(ticks);
     TimerDelay {
         deadline,
@@ -70,7 +69,8 @@ impl Future for TimerDelay {
             if !self.registered {
                 self.waker = Some(cx.waker().clone());
                 let data = core::ptr::addr_of_mut!(self.waker) as *mut ();
-                let is_earliest = unsafe { TIMER_QUEUE.schedule(self.deadline, wake_trampoline, data) };
+                let is_earliest =
+                    unsafe { TIMER_QUEUE.schedule(self.deadline, wake_trampoline, data) };
                 if is_earliest {
                     ChipImpl::set_deadline(self.deadline);
                 }

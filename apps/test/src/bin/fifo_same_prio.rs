@@ -12,17 +12,23 @@ use platform::platform_traits::Chip;
 
 #[executor::task]
 async fn task_a() {
-    unsafe { test::record("a"); }
+    unsafe {
+        test::record("a");
+    }
 }
 
 #[executor::task]
 async fn task_b() {
-    unsafe { test::record("b"); }
+    unsafe {
+        test::record("b");
+    }
 }
 
 #[executor::task]
 async fn task_c() {
-    unsafe { test::record("c"); }
+    unsafe {
+        test::record("c");
+    }
 }
 
 #[executor::main]

@@ -4,22 +4,22 @@ pub use platform_traits;
 pub use platform_traits::timer;
 
 #[cfg(feature = "riscv64")]
-pub use riscv64_rt as arch;
+pub use arch::{disable_interrupts, enable_interrupts, idle};
 #[cfg(feature = "riscv64")]
-pub use arch::{enable_interrupts, disable_interrupts, idle};
+pub use riscv64_rt as arch;
 
 use platform_traits::Chip;
 use platform_traits::timer::TimerChip;
 
 #[cfg(feature = "qemu-virt")]
-use qemu_virt as chip;
-#[cfg(feature = "qemu-virt")]
 pub use chip::QemuVirt as ChipImpl;
+#[cfg(feature = "qemu-virt")]
+use qemu_virt as chip;
 
 #[cfg(feature = "std")]
-use std_chip as chip;
-#[cfg(feature = "std")]
 pub use chip::StdChip as ChipImpl;
+#[cfg(feature = "std")]
+use std_chip as chip;
 
 pub mod logger;
 pub use logger::Logger;

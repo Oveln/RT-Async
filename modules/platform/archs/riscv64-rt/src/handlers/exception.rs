@@ -3,7 +3,7 @@
 //! 异常处理器通过链接脚本弱符号定义，默认指向 `ExceptionHandler`。
 //! 平台可提供同名 `#[no_mangle]` 函数覆盖。
 
-use riscv::{ExceptionNumber, interrupt::Exception};
+use riscv::{interrupt::Exception, ExceptionNumber};
 
 use crate::TrapFrame;
 

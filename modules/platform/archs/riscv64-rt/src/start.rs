@@ -24,7 +24,12 @@ pub fn clear_bss() {
 
 #[unsafe(no_mangle)]
 extern "C" fn __start_rust() {
-    unsafe { mtvec::write(Mtvec::new(__trap_entry as *const () as usize, TrapMode::Direct)) };
+    unsafe {
+        mtvec::write(Mtvec::new(
+            __trap_entry as *const () as usize,
+            TrapMode::Direct,
+        ))
+    };
 }
 
 // Assembly entry point

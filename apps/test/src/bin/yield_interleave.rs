@@ -11,7 +11,9 @@ use executor::spawner::Spawner;
 use platform::platform_traits::Chip;
 
 async fn yield_once(label: &'static str) {
-    unsafe { test::record(label); }
+    unsafe {
+        test::record(label);
+    }
     let mut done = false;
     core::future::poll_fn(move |cx| {
         if done {
@@ -23,7 +25,9 @@ async fn yield_once(label: &'static str) {
         }
     })
     .await;
-    unsafe { test::record(label); }
+    unsafe {
+        test::record(label);
+    }
 }
 
 #[executor::task]

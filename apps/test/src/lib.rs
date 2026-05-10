@@ -13,7 +13,9 @@ static LOG_LEN: AtomicUsize = AtomicUsize::new(0);
 pub unsafe fn record(s: &'static str) {
     let idx = LOG_LEN.fetch_add(1, Ordering::Relaxed);
     if idx < LOG_CAP {
-        unsafe { LOG[idx] = s; }
+        unsafe {
+            LOG[idx] = s;
+        }
     }
 }
 

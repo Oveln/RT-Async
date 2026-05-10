@@ -39,8 +39,5 @@ fn MachineTimer(_tf: &mut platform::arch::TrapFrame) {
 
 #[executor::main]
 fn main(spawner: core::pin::Pin<&'static executor::spawner::Spawner<4>>) {
-    spawner.spawn(
-        executor::priority::Priority::new(0),
-        timer_task().unwrap(),
-    );
+    spawner.spawn(executor::priority::Priority::new(0), timer_task().unwrap());
 }

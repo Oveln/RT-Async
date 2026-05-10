@@ -2,8 +2,8 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, FnArg, ItemFn, PatType, ReturnType};
 use syn::spanned::Spanned;
+use syn::{FnArg, ItemFn, PatType, ReturnType, parse_macro_input};
 
 /// Marks an async function as a statically-allocated task.
 ///
@@ -325,40 +325,65 @@ fn extract_spawner_n(ty: &syn::Type) -> syn::Result<usize> {
     let syn::Type::Path(type_path) = ty else {
         return Err(syn::Error::new(ty.span(), "expected Pin<&Spawner<N>>"));
     };
-    let pin_seg = type_path.path.segments.last().ok_or_else(|| {
-        syn::Error::new(ty.span(), "expected Pin<&Spawner<N>>")
-    })?;
+    let pin_seg = type_path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new(ty.span(), "expected Pin<&Spawner<N>>"))?;
     if pin_seg.ident != "Pin" {
-        return Err(syn::Error::new(pin_seg.ident.span(), "expected Pin<&Spawner<N>>"));
+        return Err(syn::Error::new(
+            pin_seg.ident.span(),
+            "expected Pin<&Spawner<N>>",
+        ));
     }
     let syn::PathArguments::AngleBracketed(args) = &pin_seg.arguments else {
-        return Err(syn::Error::new(pin_seg.span(), "Pin missing generic arguments"));
+        return Err(syn::Error::new(
+            pin_seg.span(),
+            "Pin missing generic arguments",
+        ));
     };
 
     // Inner: &Spawner<N> or &'lifetime Spawner<N>
     let Some(syn::GenericArgument::Type(inner)) = args.args.first() else {
-        return Err(syn::Error::new(args.span(), "Pin generic argument must be &Spawner<N>"));
+        return Err(syn::Error::new(
+            args.span(),
+            "Pin generic argument must be &Spawner<N>",
+        ));
     };
     let syn::Type::Reference(ref_ty) = inner else {
-        return Err(syn::Error::new(inner.span(), "Pin generic argument must be &Spawner<N>"));
+        return Err(syn::Error::new(
+            inner.span(),
+            "Pin generic argument must be &Spawner<N>",
+        ));
     };
 
     // Spawner<N>
     let syn::Type::Path(spawner_path) = &*ref_ty.elem else {
         return Err(syn::Error::new(ref_ty.elem.span(), "expected Spawner<N>"));
     };
-    let spawner_seg = spawner_path.path.segments.last().ok_or_else(|| {
-        syn::Error::new(spawner_path.span(), "expected Spawner<N>")
-    })?;
+    let spawner_seg = spawner_path
+        .path
+        .segments
+        .last()
+        .ok_or_else(|| syn::Error::new(spawner_path.span(), "expected Spawner<N>"))?;
     if spawner_seg.ident != "Spawner" {
-        return Err(syn::Error::new(spawner_seg.ident.span(), "expected Spawner<N>"));
+        return Err(syn::Error::new(
+            spawner_seg.ident.span(),
+            "expected Spawner<N>",
+        ));
     }
     let syn::PathArguments::AngleBracketed(spawner_args) = &spawner_seg.arguments else {
-        return Err(syn::Error::new(spawner_seg.span(), "Spawner missing const generic N"));
+        return Err(syn::Error::new(
+            spawner_seg.span(),
+            "Spawner missing const generic N",
+        ));
     };
 
     let Some(syn::GenericArgument::Const(expr)) = spawner_args.args.first() else {
-        return Err(syn::Error::new(spawner_args.span(), "expected Spawner<N> with const generic"));
+        return Err(syn::Error::new(
+            spawner_args.span(),
+            "expected Spawner<N> with const generic",
+        ));
     };
     let syn::Expr::Lit(syn::ExprLit {
         lit: syn::Lit::Int(lit),

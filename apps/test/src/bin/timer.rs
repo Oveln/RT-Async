@@ -10,9 +10,9 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use platform::{ChipImpl, idle};
 use platform::platform_traits::Chip;
 use platform::timer::TimerChip;
+use platform::{ChipImpl, idle};
 
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
 static ISR_TICK: AtomicU64 = AtomicU64::new(0);
