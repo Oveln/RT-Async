@@ -43,3 +43,7 @@ required-features = ["qemu-virt"]
 [[bin]]
 name = "preempt_spawn_chain"
 required-features = ["qemu-virt"]
+
+[[bin]]
+name = "timer"
+required-features = ["qemu-virt"]

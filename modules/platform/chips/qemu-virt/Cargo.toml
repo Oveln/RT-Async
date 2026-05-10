@@ -6,3 +6,4 @@ publish = false
 
 [dependencies]
 platform-traits = { path = "../../../platform-traits" }
+riscv = "0.16.0"

@@ -56,6 +56,30 @@ pub unsafe fn pend();
 pub unsafe fn clear_pend() -> bool;
 ```
 
+## TimerChip Trait
+
+`TimerChip` 在 `platform-traits::timer` 模块中定义，提供平台无关的定时器抽象。`FREQ_HZ` 作为 const generic 参数编码 tick 频率，可直接与 fugit 的 `Duration<u64, 1, FREQ_HZ>` / `Instant<u64, 1, FREQ_HZ>` 类型对齐。
+
+```rust
+pub trait TimerChip<const FREQ_HZ: u32> {
+    fn now_ticks() -> u64;
+    fn set_deadline(tick: u64);
+    unsafe fn enable_irq();
+}
+```
+
+| 方法 | 说明 |
+|------|------|
+| `now_ticks()` | 读取当前 tick 计数（单调递增） |
+| `set_deadline(tick)` | 设定绝对 deadline，`now_ticks() >= tick` 时触发中断；传 `u64::MAX` 表示无 deadline |
+| `enable_irq()` | 使能定时器中断源，初始化时调用一次 |
+
+### 设计说明
+
+- **绝对 deadline 语义**：executor 的 timer queue 内部存储绝对 deadline，调用 `set_deadline` 时零转换。
+- **ARM 兼容**：ARM 实现内部维护软件 64-bit tick 计数器，将绝对 deadline 转为相对 reload 值并处理 24-bit SysTick 限制。
+- **fugit 集成**：`Duration<u64, 1, FREQ_HZ>` 的 tick 单位与 `now_ticks()` / `set_deadline()` 完全一致。
+
 ## 现有实现
 
 ### StdChip（`std` feature）
@@ -64,7 +88,7 @@ pub unsafe fn clear_pend() -> bool;
 
 ### QemuVirt（`qemu-virt` feature）
 
-针对 QEMU `virt` 机器的 RISC-V 实现，直接操作 CLINT 寄存器触发/清除 MSI。
+针对 QEMU `virt` 机器的 RISC-V 实现，直接操作 CLINT 寄存器触发/清除 MSI。同时实现了 `TimerChip<10_000_000>`（10 MHz），基于 CLINT `mtime` / `mtimecmp` 寄存器，通过 `riscv` crate 操作 `mie.MTIE`。
 
 ## 移植指南
 
@@ -72,5 +96,6 @@ pub unsafe fn clear_pend() -> bool;
 
 1. 创建新的 chip crate（如 `chips/my-board/`）
 2. 实现 `Chip` trait
-3. 在 `platform/lib.rs` 中添加 feature gate 指向新实现
-4. 提供 `arch` 模块（中断使能/禁用、TrapFrame 定义、idle 等）
+3. 实现 `TimerChip<FREQ_HZ>` trait（`FREQ_HZ` 为硬件定时器频率）
+4. 在 `platform/lib.rs` 中添加 feature gate 指向新实现
+5. 提供 `arch` 模块（中断使能/禁用、TrapFrame 定义、idle 等）

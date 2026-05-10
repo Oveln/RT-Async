@@ -46,7 +46,7 @@ rt-async/
 │   │   └── task/          #   TaskStorage、RunQueue、TaskInfo
 │   ├── executor-macro/    # 过程宏（#[task]、#[main]、#[interrupt]）
 │   ├── platform/          # 平台实现（RISC-V QEMU virt、std）
-│   └── platform-traits/   # Chip trait 定义
+│   └── platform-traits/   # Chip / TimerChip trait 定义
 └── apps/
     ├── demo/              # 示例程序
     └── test/              # 集成测试（QEMU 运行）

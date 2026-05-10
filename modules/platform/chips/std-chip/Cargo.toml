@@ -6,3 +6,6 @@ publish = false
 
 [dependencies]
 platform-traits = { path = "../../../platform-traits" }
+
+[features]
+std = []

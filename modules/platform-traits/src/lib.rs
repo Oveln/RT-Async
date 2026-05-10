@@ -4,6 +4,8 @@
 
 #![no_std]
 
+pub mod timer;
+
 /// Chip 平台抽象。
 ///
 /// 每个 SoC / board 提供此 trait 的具体实现。

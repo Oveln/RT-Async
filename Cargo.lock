@@ -234,6 +234,7 @@ name = "qemu-virt"
 version = "0.1.0"
 dependencies = [
  "platform-traits",
+ "riscv",
 ]
 
 [[package]]
@@ -271,7 +272,19 @@ dependencies = [
  "critical-section",
  "embedded-hal",
  "paste",
+ "riscv-macros",
  "riscv-types",
+]
+
+[[package]]
+name = "riscv-macros"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d47d1fb716349455b8e5e3ebbf1eff95344dbdf9f782a4e1359d2f16f51e3dce"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

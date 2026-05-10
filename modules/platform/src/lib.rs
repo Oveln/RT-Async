@@ -1,6 +1,7 @@
 #![no_std]
 
 pub use platform_traits;
+pub use platform_traits::timer;
 
 #[cfg(feature = "riscv64")]
 pub use riscv64_rt as arch;
