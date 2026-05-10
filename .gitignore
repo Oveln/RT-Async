@@ -1,1 +1,4 @@
 /target
+blogs/node_modules
+blogs/.vitepress/cache
+blogs/.vitepress/dist

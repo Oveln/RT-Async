@@ -1,0 +1,54 @@
+name: Build and Deploy VitePress Blog
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'blogs/.vitepress/**'
+      - 'blogs/package.json'
+      - 'blogs/*.md'
+      - 'blogs/**/*.md'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'blogs/.vitepress/**'
+      - 'blogs/package.json'
+      - 'blogs/*.md'
+      - 'blogs/**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Install dependencies
+      working-directory: ./blogs
+      run: bun install
+
+    - name: Build VitePress site
+      working-directory: ./blogs
+      run: bun run build
+
+    - name: Deploy to blog branch
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./blogs/.vitepress/dist
+        publish_branch: blog
+        force_orphan: true
