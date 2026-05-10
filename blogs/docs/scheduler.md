@@ -26,18 +26,17 @@ pub struct Spawner<const N: usize> {
 - **executors** — `N` 个 `Executor` 实例的数组，下标即优先级
 - **bitmap** — 两级位图，记录哪些优先级有就绪任务（始终 64 组，避免 const generic 泛化 API）
 - **prio_stack** — LIFO 栈，记录当前占据系统栈空间的 executor 优先级，栈顶为当前运行的 executor
-- **pend** — 平台回调，触发软件中断以进入调度 ISR
 
 ### 关键方法
 
-#### `init(pend)`
+#### `init()`
 
-将 bitmap 操作回调（`BitmapOps`）注入每个 Executor，设置平台 pend 回调。必须在 pin 之后调用一次。
+将 bitmap 操作回调（`BitmapOps`）注入每个 Executor。必须在 pin 之后调用一次。
 
 ```rust
 let mut spawner = Spawner::<4>::new();
 let mut spawner = pin!(spawner);
-spawner.as_mut().init(platform::pend);
+spawner.as_mut().init();
 ```
 
 #### `spawn(prio, token)`

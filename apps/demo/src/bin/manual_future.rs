@@ -62,7 +62,7 @@ pub unsafe extern "C" fn __rust_main() -> ! {
 
         let ptr = core::ptr::addr_of_mut!(SPAWNER).cast::<Spawner<4>>();
         ptr.write(Spawner::new());
-        Pin::new_unchecked(&mut *ptr).as_mut().init(platform::pend);
+        Pin::new_unchecked(&mut *ptr).as_mut().init();
 
         let spawner = Pin::new_unchecked(&*ptr);
 

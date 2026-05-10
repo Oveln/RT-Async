@@ -73,6 +73,7 @@ dependencies = [
  "executor-macro",
  "heapless",
  "log",
+ "platform",
  "portable-atomic",
 ]
 

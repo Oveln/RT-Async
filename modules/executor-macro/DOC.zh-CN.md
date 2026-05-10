@@ -49,7 +49,7 @@ static mut __SPAWNER: MaybeUninit<Spawner<N>> = MaybeUninit::uninit();
 裸机入口点，由汇编 `_start` 跳转进来。执行顺序：
 
 1. `platform::init()` — 日志/平台初始化
-2. 创建 `Spawner::new()`，pin 住，调用 `.init(platform::pend)`
+2. 创建 `Spawner::new()`，pin 住，调用 `.init()`
 3. 执行**用户的函数体**（即任务 spawn 代码）
 4. `platform::start()` — 使能 MSI + 全局中断
 5. `loop { platform::idle() }` — WFI 休眠

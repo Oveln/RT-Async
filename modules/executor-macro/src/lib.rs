@@ -148,7 +148,7 @@ pub fn task(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// 2. **`#[unsafe(no_mangle)] __rust_main() -> !`** — the bare-metal entry
 ///    point jumped to from the assembly `_start` stub.  It performs, in order:
 ///    - `platform::init()`  — logger / platform setup
-///    - Create `Spawner::new()`, pin it, call `.init(platform::pend)`
+///    - Create `Spawner::new()`, pin it, call `.init()`
 ///    - Execute the *user's function body* (the task-spawning code)
 ///    - `platform::start()` — enable MSI + global interrupts
 ///    - `loop { platform::idle() }` — WFI sleep
@@ -278,7 +278,7 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     .cast::<executor::spawner::Spawner<#n_lit>>();
                 ptr.write(executor::spawner::Spawner::new());
                 ::core::pin::Pin::new_unchecked(&mut *ptr)
-                    .init(platform::pend);
+                    .init();
 
                 let #spawner_pat = ::core::pin::Pin::new_unchecked(&*ptr);
 

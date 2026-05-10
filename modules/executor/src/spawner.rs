@@ -91,7 +91,6 @@ pub struct Spawner<const N: usize> {
     executors: [Executor; N],
     bitmap: BitmapMutex<64>,
     prio_stack: critical_section::Mutex<UnsafeCell<Vec<Priority, N>>>,
-    pend: UnsafeCell<unsafe fn()>,
     _pinned: PhantomPinned,
 }
 
@@ -99,8 +98,6 @@ pub struct Spawner<const N: usize> {
 // - `executors` — each Executor impls Sync; run_queue under critical_section, bitmap_ops
 //   written once in init then read-only.
 // - `bitmap` / `prio_stack` — wrapped in `critical_section::Mutex`.
-// - `pend` — written once in `init()` (exclusive `Pin<&mut Self>`) before any `spawn()`,
-//   read only inside critical sections thereafter.
 unsafe impl<const N: usize> Sync for Spawner<N> {}
 
 impl<const N: usize> Spawner<N> {
@@ -116,17 +113,13 @@ impl<const N: usize> Spawner<N> {
         unsafe { (*mutex.borrow(cs).get()).clear(prio) };
     }
 
-    unsafe fn noop_pend() {
-        panic!("spawner: pend not initialized, call Spawner::init first")
-    }
-
     pub fn new() -> Self {
         let () = Self::_ASSERT_N_IN_RANGE;
         Self {
             executors: core::array::from_fn(Executor::new),
             bitmap: critical_section::Mutex::new(UnsafeCell::new(PriorityBitmap::new())),
             prio_stack: critical_section::Mutex::new(UnsafeCell::new(Vec::new())),
-            pend: UnsafeCell::new(Self::noop_pend),
+
             _pinned: PhantomPinned,
         }
     }
@@ -137,10 +130,6 @@ impl<const N: usize> Spawner<N> {
     /// bitmap and monomorphised `set`/`clear` function pointers, then injects
     /// them into every executor.  Must be called exactly once after pinning.
     ///
-    /// `pend` is a platform-specific callback that triggers a scheduler
-    /// software interrupt, called when a higher-priority task is spawned
-    /// while a lower-priority executor is running.
-    ///
     /// # Safety context
     ///
     /// The `Pin` guarantee ensures the bitmap's address remains stable for
@@ -148,9 +137,8 @@ impl<const N: usize> Spawner<N> {
     /// [`BitmapOps`] is always valid.
     ///
     /// [`BitmapOps`]: crate::executor::BitmapOps
-    pub fn init(self: Pin<&mut Self>, pend: unsafe fn()) {
+    pub fn init(self: Pin<&mut Self>) {
         let this = unsafe { self.get_unchecked_mut() };
-        unsafe { *this.pend.get() = pend };
         let ctx = core::ptr::from_ref(&this.bitmap) as *mut ();
         for exec in &this.executors {
             exec.set_bitmap_ops(BitmapOps {
@@ -192,7 +180,7 @@ impl<const N: usize> Spawner<N> {
                 };
                 if should_pend {
                     unsafe {
-                        (*self.pend.get())();
+                        platform::pend();
                     }
                 }
             })
@@ -275,10 +263,9 @@ mod tests {
 
     macro_rules! pinned_spawner {
         ($name:ident, $n:expr) => {
-            unsafe fn noop() {}
             let $name = Spawner::<$n>::new();
             let mut $name = core::pin::pin!($name);
-            $name.as_mut().init(noop);
+            $name.as_mut().init();
             let $name = $name;
         };
     }
