@@ -12,7 +12,6 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use fugit::ExtU64;
 use platform::platform_traits::Chip;
-use platform::timer::TimerChip;
 
 static STEP: AtomicUsize = AtomicUsize::new(0);
 
@@ -40,8 +39,6 @@ fn MachineTimer(_tf: &mut platform::arch::TrapFrame) {
 
 #[executor::main]
 fn main(spawner: core::pin::Pin<&'static executor::spawner::Spawner<4>>) {
-    unsafe { platform::ChipImpl::enable_irq() };
-
     spawner.spawn(
         executor::priority::Priority::new(0),
         timer_task().unwrap(),

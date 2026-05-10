@@ -45,8 +45,8 @@ pub unsafe extern "C" fn __rust_main() {
     // 先设 deadline 再开中断，避免 mtimecmp 初始值导致立即触发。
     let ticks_per_ms = ChipImpl::FREQ_HZ as u64 / 1_000;
     let deadline = ChipImpl::now_ticks() + ticks_per_ms;
+    unsafe { ChipImpl::enable_timer_irq() };
     ChipImpl::set_deadline(deadline);
-    unsafe { ChipImpl::enable_irq() };
     unsafe { platform::arch::enable_interrupts() };
 
     // wfi 等待中断唤醒。

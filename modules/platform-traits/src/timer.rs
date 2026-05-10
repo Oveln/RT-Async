@@ -45,5 +45,5 @@ pub trait TimerChip {
     /// Enable the timer interrupt source.
     ///
     /// Called once during initialisation, before the main loop starts.
-    unsafe fn enable_irq();
+    unsafe fn enable_timer_irq();
 }

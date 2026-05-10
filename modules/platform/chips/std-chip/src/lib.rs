@@ -29,7 +29,7 @@ impl TimerChip for StdChip {
         todo!()
     }
 
-    unsafe fn enable_irq() {
+    unsafe fn enable_timer_irq() {
         todo!()
     }
 }

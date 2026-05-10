@@ -9,6 +9,7 @@ pub use riscv64_rt as arch;
 pub use arch::{enable_interrupts, disable_interrupts, idle};
 
 use platform_traits::Chip;
+use platform_traits::timer::TimerChip;
 
 #[cfg(feature = "qemu-virt")]
 use qemu_virt as chip;
@@ -29,10 +30,11 @@ pub fn init() {
     let _ = LOGGER.init(log::LevelFilter::Trace);
 }
 
-/// 使能 MSI 并开全局中断，开始响应调度器 ISR。
+/// 使能 MSI、定时器中断并开全局中断，开始响应调度器 ISR。
 #[cfg(feature = "qemu-virt")]
 pub unsafe fn start() {
     unsafe {
+        ChipImpl::enable_timer_irq();
         arch::enable_msi();
         arch::enable_interrupts();
     }

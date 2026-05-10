@@ -59,7 +59,8 @@ impl TimerChip for QemuVirt {
         unsafe { core::ptr::write_volatile(CLINT_MTIMECMP as *mut u64, tick) };
     }
 
-    unsafe fn enable_irq() {
+    unsafe fn enable_timer_irq() {
+        Self::set_deadline(u64::MAX);
         unsafe { riscv::register::mie::set_mtimer() };
     }
 }
