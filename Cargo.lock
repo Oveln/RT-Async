@@ -107,7 +107,9 @@ dependencies = [
 name = "futures"
 version = "0.1.0"
 dependencies = [
+ "critical-section",
  "fugit",
+ "heapless",
  "platform",
  "timer",
 ]

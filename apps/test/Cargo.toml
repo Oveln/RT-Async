@@ -53,3 +53,15 @@ required-features = ["qemu-virt"]
 [[bin]]
 name = "timer_async"
 required-features = ["qemu-virt"]
+
+[[bin]]
+name = "mutex"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "mutex_contention"
+required-features = ["qemu-virt"]
+
+[[bin]]
+name = "mutex_priority"
+required-features = ["qemu-virt"]
