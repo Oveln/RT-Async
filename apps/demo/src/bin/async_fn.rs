@@ -8,6 +8,9 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 

@@ -58,6 +58,7 @@ dependencies = [
  "futures",
  "log",
  "platform",
+ "qemu-virt",
 ]
 
 [[package]]
@@ -82,6 +83,27 @@ dependencies = [
 [[package]]
 name = "executor-macro"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "extern-trait"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a141ec56226dca390c7900f04f914a9783177e18ed8ac92e8a94014a84b8078b"
+dependencies = [
+ "extern-trait-impl",
+ "typeid",
+]
+
+[[package]]
+name = "extern-trait-impl"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e685faea53fd0bce4d327a36d0e7a2489edc9205576185116ab159c5028c666e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -231,17 +253,11 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 name = "platform"
 version = "0.1.0"
 dependencies = [
+ "extern-trait",
  "log",
- "platform-traits",
  "portable-atomic",
- "qemu-virt",
  "riscv64-rt",
- "std-chip",
 ]
-
-[[package]]
-name = "platform-traits"
-version = "0.1.0"
 
 [[package]]
 name = "portable-atomic"
@@ -262,7 +278,8 @@ dependencies = [
 name = "qemu-virt"
 version = "0.1.0"
 dependencies = [
- "platform-traits",
+ "extern-trait",
+ "platform",
  "riscv",
 ]
 
@@ -372,7 +389,8 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "std-chip"
 version = "0.1.0"
 dependencies = [
- "platform-traits",
+ "extern-trait",
+ "platform",
 ]
 
 [[package]]
@@ -395,6 +413,7 @@ dependencies = [
  "futures",
  "log",
  "platform",
+ "qemu-virt",
 ]
 
 [[package]]
@@ -474,6 +493,12 @@ dependencies = [
  "tracing-core",
  "tracing-log",
 ]
+
+[[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "unicode-ident"

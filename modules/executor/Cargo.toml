@@ -13,4 +13,4 @@ critical-section = { version = "1.2.0", features = ["restore-state-bool"] }
 log = { version = "0.4", default-features = false }
 
 [features]
-std = ["critical-section/std", "platform/std"]
+std = ["critical-section/std"]

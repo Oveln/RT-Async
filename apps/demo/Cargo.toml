@@ -8,12 +8,13 @@ publish = false
 executor = { path = "../../modules/executor" }
 platform = { path = "../../modules/platform" }
 futures = { path = "../../modules/futures" }
+qemu-virt = { path = "../../modules/platform/chips/qemu-virt", optional = true }
 fugit = "0.4"
 log = { version = "0.4", default-features = false }
 
 [features]
-std = ["platform/std"]
-qemu-virt = ["platform/qemu-virt"]
+std = []
+qemu-virt = ["platform/riscv64", "dep:qemu-virt"]
 
 [[bin]]
 name = "async_fn"

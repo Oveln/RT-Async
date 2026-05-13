@@ -8,6 +8,9 @@
 #![no_std]
 #![no_main]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use core::mem::MaybeUninit;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicU32, Ordering};

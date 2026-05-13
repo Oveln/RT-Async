@@ -5,5 +5,6 @@ edition = "2024"
 publish = false
 
 [dependencies]
-platform-traits = { path = "../../../platform-traits" }
+platform = { path = "../../" }
+extern-trait = "0.4.3"
 riscv = "0.16.0"

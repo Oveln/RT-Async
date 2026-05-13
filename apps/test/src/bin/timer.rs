@@ -8,21 +8,22 @@
 #![no_std]
 #![no_main]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use platform::platform_traits::Chip;
-use platform::timer::TimerChip;
-use platform::{ChipImpl, idle};
+use platform::{Chip, ChipImpl, TimerChip, TimerChipImpl, idle};
 
 static TIMER_FIRED: AtomicBool = AtomicBool::new(false);
 static ISR_TICK: AtomicU64 = AtomicU64::new(0);
 
 #[executor::interrupt]
 fn MachineTimer(_tf: &mut platform::arch::TrapFrame) {
-    let now = ChipImpl::now_ticks();
+    let now = TimerChipImpl::now_ticks();
     ISR_TICK.store(now, Ordering::Relaxed);
     TIMER_FIRED.store(true, Ordering::Relaxed);
-    ChipImpl::set_deadline(u64::MAX);
+    TimerChipImpl::set_deadline(u64::MAX);
 }
 
 #[unsafe(no_mangle)]
@@ -33,8 +34,8 @@ pub unsafe extern "C" fn __rust_main() {
     platform::init();
 
     // 测试 1: now_ticks() 单调递增
-    let t0 = ChipImpl::now_ticks();
-    let t1 = ChipImpl::now_ticks();
+    let t0 = TimerChipImpl::now_ticks();
+    let t1 = TimerChipImpl::now_ticks();
     if t1 < t0 {
         ChipImpl::put_str("FAIL: now_ticks not monotonic\n");
         unsafe { core::ptr::write_volatile(0x100_000 as *mut u32, 0x3333 | (1 << 16)) };
@@ -43,10 +44,10 @@ pub unsafe extern "C" fn __rust_main() {
 
     // 测试 2: set_deadline 触发中断
     // 先设 deadline 再开中断，避免 mtimecmp 初始值导致立即触发。
-    let ticks_per_ms = ChipImpl::FREQ_HZ as u64 / 1_000;
-    let deadline = ChipImpl::now_ticks() + ticks_per_ms;
-    unsafe { ChipImpl::enable_timer_irq() };
-    ChipImpl::set_deadline(deadline);
+    let ticks_per_ms = TimerChipImpl::freq_hz() as u64 / 1_000;
+    let deadline = TimerChipImpl::now_ticks() + ticks_per_ms;
+    unsafe { TimerChipImpl::enable_timer_irq() };
+    TimerChipImpl::set_deadline(deadline);
     unsafe { platform::arch::enable_interrupts() };
 
     // wfi 等待中断唤醒。

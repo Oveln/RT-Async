@@ -6,9 +6,12 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use executor::priority::Priority;
 use fugit::ExtU64;
-use platform::platform_traits::Chip;
+use platform::Chip;
 
 #[executor::task]
 async fn tick_task() {

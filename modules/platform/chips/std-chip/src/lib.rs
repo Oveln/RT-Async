@@ -1,9 +1,12 @@
+#[allow(unreachable_code)]
 use std::process::exit;
 
-use platform_traits::{Chip, timer::TimerChip};
+use extern_trait::extern_trait;
+use platform::{Chip, TimerChip};
 
 pub struct StdChip;
 
+#[extern_trait]
 impl Chip for StdChip {
     fn shutdown() -> ! {
         exit(0)
@@ -18,8 +21,11 @@ impl Chip for StdChip {
     unsafe fn clear_pend() {}
 }
 
+#[extern_trait]
 impl TimerChip for StdChip {
-    const FREQ_HZ: u32 = 1_000_000;
+    fn freq_hz() -> u32 {
+        1_000_000
+    }
 
     fn now_ticks() -> u64 {
         todo!()

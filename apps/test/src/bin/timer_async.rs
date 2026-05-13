@@ -8,10 +8,13 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use fugit::ExtU64;
-use platform::platform_traits::Chip;
+use platform::Chip;
 
 static STEP: AtomicUsize = AtomicUsize::new(0);
 

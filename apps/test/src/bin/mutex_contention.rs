@@ -9,12 +9,14 @@
 #![no_main]
 #![feature(impl_trait_in_assoc_type)]
 
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
 use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::platform_traits::Chip;
-
+use platform::Chip;
 static DATA: futures::mutex::Mutex<u32, 3> = futures::mutex::Mutex::new(0);
 
 async fn yield_once() {

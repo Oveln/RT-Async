@@ -1,8 +1,7 @@
 use core::fmt::Write;
 use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
 
-use crate::ChipImpl;
-use platform_traits::Chip;
+use crate::{Chip, ChipImpl};
 
 struct ChipWriter(core::marker::PhantomData<fn() -> ChipImpl>);
 

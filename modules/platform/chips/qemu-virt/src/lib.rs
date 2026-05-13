@@ -3,8 +3,10 @@
 //! 为 QEMU `virt` 平台（RISC-V 64）提供 [`Chip`] 和 [`TimerChip`] 的具体实现。
 
 #![no_std]
+#![allow(unreachable_code)]
 
-use platform_traits::{Chip, timer::TimerChip};
+use extern_trait::extern_trait;
+use platform::{Chip, TimerChip};
 
 /// QEMU virt 串口寄存器基址（NS16550A 兼容 UART）。
 const UART_BASE: usize = 0x1000_0000;
@@ -20,6 +22,7 @@ const CLINT_MTIME: usize = 0x200_BFF8;
 /// QEMU virt 平台的 Chip 实现。
 pub struct QemuVirt;
 
+#[extern_trait]
 impl Chip for QemuVirt {
     fn shutdown() -> ! {
         unsafe {
@@ -45,11 +48,11 @@ impl Chip for QemuVirt {
     }
 }
 
-/// QEMU virt 定时器频率：10 MHz。
-const QEMU_VIRT_FREQ_HZ: u32 = 10_000_000;
-
+#[extern_trait]
 impl TimerChip for QemuVirt {
-    const FREQ_HZ: u32 = QEMU_VIRT_FREQ_HZ;
+    fn freq_hz() -> u32 {
+        10_000_000
+    }
 
     fn now_ticks() -> u64 {
         unsafe { core::ptr::read_volatile(CLINT_MTIME as *const u64) }

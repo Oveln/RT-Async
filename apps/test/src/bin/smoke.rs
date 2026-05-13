@@ -6,7 +6,10 @@
 #![no_std]
 #![no_main]
 
-use platform::platform_traits::Chip;
+#[cfg(feature = "qemu-virt")]
+extern crate qemu_virt;
+
+use platform::Chip;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rust_main() -> ! {
