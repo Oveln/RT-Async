@@ -14,3 +14,6 @@ log = { version = "0.4", default-features = false }
 
 [features]
 std = ["critical-section/std"]
+
+[dev-dependencies]
+std-chip = { path = "../platform/chips/std-chip" }

@@ -1,4 +1,10 @@
-use core::{cell::SyncUnsafeCell, pin::Pin, ptr::NonNull, sync::atomic::Ordering, task::Context};
+use core::{
+    cell::SyncUnsafeCell,
+    pin::Pin,
+    ptr::NonNull,
+    sync::atomic::Ordering,
+    task::{Context, Waker},
+};
 
 use portable_atomic::AtomicPtr;
 
@@ -17,7 +23,41 @@ use crate::{
 #[derive(Debug)]
 pub struct SpawnError;
 
+/// JoinHandle state: holds the task output and the waker to wake on completion.
+pub(crate) struct JoinState<T> {
+    pub(crate) result: SyncUnsafeCell<Option<T>>,
+    pub(crate) waker: SyncUnsafeCell<Option<Waker>>,
+}
+
+impl<T> JoinState<T> {
+    pub const fn new() -> Self {
+        Self {
+            result: SyncUnsafeCell::new(None),
+            waker: SyncUnsafeCell::new(None),
+        }
+    }
+}
+
 impl TaskRef {
+    /// Returns a reference to the [`JoinState<T>`] field inside the
+    /// [`TaskStorage<F>`] that this `TaskRef` points to.
+    ///
+    /// Relies on `#[repr(C)]` layout: `JoinState<T>` is the second field,
+    /// at offset `size_of::<TaskInfo>()` rounded up to alignment of `JoinState<T>`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `T` matches `F::Output` of the original
+    /// `TaskStorage<F>` from which this `TaskRef` was created.
+    pub(crate) unsafe fn join_state<T>(&self) -> &JoinState<T> {
+        unsafe {
+            let base = self.as_ptr() as *const u8;
+            let offset = core::mem::size_of::<TaskInfo>()
+                .next_multiple_of(core::mem::align_of::<JoinState<T>>());
+            &*(base.add(offset) as *const JoinState<T>)
+        }
+    }
+
     /// Create a [`TaskRef`] pointing to the [`TaskInfo`] header inside a
     /// [`TaskStorage`].  Relies on `#[repr(C)]` layout — `TaskInfo` is the
     /// first field, so casting the `TaskStorage` pointer yields the correct
@@ -37,6 +77,7 @@ impl TaskRef {
 #[repr(C)]
 pub struct TaskStorage<F: Future + 'static> {
     pub(crate) info: TaskInfo,
+    join: JoinState<F::Output>,
     f: UninitCell<F>,
 }
 
@@ -49,6 +90,7 @@ impl<F: Future + 'static> TaskStorage<F> {
                 executor_ptr: AtomicPtr::new(core::ptr::null_mut()),
                 poll_fn: SyncUnsafeCell::new(None),
             },
+            join: JoinState::new(),
             f: UninitCell::uninit(),
         }
     }
@@ -85,16 +127,22 @@ impl<F: Future + 'static> TaskStorage<F> {
         unsafe fn poll_exited(_p: TaskRef) {}
 
         match future.poll(&mut cx) {
-            core::task::Poll::Ready(_) => {
+            core::task::Poll::Ready(output) => {
                 unsafe {
+                    *this.join.result.get() = Some(output);
                     this.info
                         .executor_ptr
                         .store(core::ptr::null_mut(), Ordering::Release);
 
                     this.f.drop_in_place();
-                    *this.info.poll_fn.get() = Some(poll_exited)
+                    *this.info.poll_fn.get() = Some(poll_exited);
                 }
                 this.info.state.despawn();
+                unsafe {
+                    if let Some(w) = (*this.join.waker.get()).take() {
+                        w.wake();
+                    }
+                }
             }
             core::task::Poll::Pending => {}
         }
@@ -115,6 +163,8 @@ impl<F: Future + 'static> TaskStorage<F> {
             return Err(SpawnError);
         }
         unsafe {
+            *self.join.result.get() = None;
+            *self.join.waker.get() = None;
             *self.info.poll_fn.get() = Some(TaskStorage::<F>::poll);
             self.f.write_in_place(f);
         }

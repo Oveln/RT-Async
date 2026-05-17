@@ -78,6 +78,7 @@ dependencies = [
  "log",
  "platform",
  "portable-atomic",
+ "std-chip",
 ]
 
 [[package]]

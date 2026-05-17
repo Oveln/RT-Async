@@ -66,3 +66,7 @@ required-features = ["qemu-virt"]
 [[bin]]
 name = "mutex_priority"
 required-features = ["qemu-virt"]
+
+[[bin]]
+name = "join_handle"
+required-features = ["qemu-virt"]

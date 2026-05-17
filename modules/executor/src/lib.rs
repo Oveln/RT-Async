@@ -56,3 +56,6 @@ pub mod priority_bitmap;
 pub mod spawner;
 pub mod task;
 mod util;
+
+#[cfg(test)]
+extern crate std_chip;

@@ -1,5 +1,6 @@
 use core::{
     cell::UnsafeCell,
+    future::Future,
     marker::{PhantomData, PhantomPinned},
     pin::Pin,
 };
@@ -10,7 +11,7 @@ use crate::{
     executor::{BitmapOps, Executor},
     priority::Priority,
     priority_bitmap::PriorityBitmap,
-    task::TaskRef,
+    task::{JoinHandle, TaskRef},
 };
 
 type BitmapMutex<const G: usize> = critical_section::Mutex<UnsafeCell<PriorityBitmap<G>>>;
@@ -152,13 +153,19 @@ impl<const N: usize> Spawner<N> {
     /// Dispatch a spawned task to the executor at the given priority.
     ///
     /// Consumes the [`SpawnToken`] (via `mem::forget`) to satisfy the
-    /// must-consume contract.
-    pub fn spawn<S: Send>(self: Pin<&Self>, prio: Priority, token: SpawnToken<S>) {
+    /// must-consume contract.  Returns a [`JoinHandle`] that resolves to
+    /// the task's output once it completes.
+    pub fn spawn<S: Future + Send>(
+        self: Pin<&Self>,
+        prio: Priority,
+        token: SpawnToken<S>,
+    ) -> JoinHandle<S::Output> {
         let executor = self
             .executors
             .get(prio.to_usize())
             .expect("priority out of range");
         let task = token.task_ref;
+        let handle = JoinHandle::new(task);
         log::debug!(
             "spawner: spawn task {:p} at prio {}",
             task.info(),
@@ -185,6 +192,7 @@ impl<const N: usize> Spawner<N> {
                 }
             })
         }
+        handle
     }
 
     /// Check the priority bitmap (inside the `Mutex`) for a higher-priority
