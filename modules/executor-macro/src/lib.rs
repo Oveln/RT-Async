@@ -294,6 +294,11 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #no_mangle_attr
         pub unsafe extern "C" fn MachineSoft(trap_frame: &mut platform::arch::TrapFrame) {
             unsafe {
+                unsafe extern "C" {
+                    fn __Inner_MachineSoft(trap_frame: &mut platform::arch::TrapFrame);
+                }
+                __Inner_MachineSoft(trap_frame);
+
                 if platform::clear_pend() {
                     let #spawner_pat = ::core::pin::Pin::new_unchecked(
                         &*::core::ptr::addr_of!(__SPAWNER)
@@ -306,11 +311,6 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         platform::disable_interrupts();
                         #spawner_pat.complete_executor();
                     }
-                } else {
-                    unsafe extern "C" {
-                        fn __Inner_MachineSoft(trap_frame: &mut platform::arch::TrapFrame);
-                    }
-                    __Inner_MachineSoft(trap_frame);
                 }
             }
         }
