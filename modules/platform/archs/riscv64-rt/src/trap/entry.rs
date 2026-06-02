@@ -9,8 +9,13 @@ core::arch::global_asm!(
     ".global __trap_entry",
     ".align 4",
     "__trap_entry:",
-    // === 在当前栈上保存上下文 (256 字节) ===
-    "addi sp, sp, -256",
+    // === 在当前栈上保存上下文 ===
+    // 使用 t0 临时保存原始 sp，分配 272 字节（256 trap frame + 16 对齐余量），
+    // 强制 16 字节对齐以满足 RISC-V 调用约定，然后将原始 sp 存入偏移 256。
+    "mv t0, sp",              // t0 = 原始 sp
+    "addi sp, sp, -272",      // 分配 256 + 16 字节
+    "andi sp, sp, -16",       // 强制 16 字节对齐
+    "sd t0, 256(sp)",         // 保存原始 sp 到 padding 区域
     "sd x1, 0(sp)",    // ra
     "sd x3, 8(sp)",    // gp
     "sd x4, 16(sp)",   // tp
@@ -85,6 +90,7 @@ core::arch::global_asm!(
     "ld x29, 216(sp)",
     "ld x30, 224(sp)",
     "ld x31, 232(sp)",
-    "addi sp, sp, 256",
+    // 从 padding 区域恢复原始 sp（而非 addi，因为对齐可能消耗了额外字节）
+    "ld sp, 256(sp)",
     "mret",
 );

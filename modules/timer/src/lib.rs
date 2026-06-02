@@ -61,21 +61,56 @@ impl<const N: usize> TimerQueue<N> {
     /// `data` must remain valid until the callback fires or the entry is
     /// cancelled. The callback will be called in ISR context.
     pub unsafe fn schedule(&self, deadline: u64, callback: Callback, data: *mut ()) -> bool {
+        self.try_schedule(deadline, callback, data)
+            .expect("timer: TimerQueue full")
+    }
+
+    /// Like [`schedule`](Self::schedule), but returns `Err(())` instead of
+    /// panicking when the queue is full.
+    ///
+    /// Returns `Ok(is_earliest)` where `is_earliest` is `true` when the new
+    /// deadline is the earliest in the queue and the hardware compare
+    /// register should be reprogrammed.
+    pub fn try_schedule(
+        &self,
+        deadline: u64,
+        callback: Callback,
+        data: *mut (),
+    ) -> Result<bool, ()> {
         critical_section::with(|cs| {
             let entries = unsafe { &mut *self.inner.borrow(cs).get() };
             let prev_min = entries.iter().map(|e| e.deadline).min();
-            if entries
+            entries
                 .push(Entry {
                     deadline,
                     callback,
                     data,
                 })
-                .is_err()
-            {
-                panic!("timer: TimerQueue full");
-            }
+                .map_err(|_| ())?;
             let new_min = entries.iter().map(|e| e.deadline).min().unwrap();
-            prev_min.map_or(true, |p| new_min < p)
+            Ok(prev_min.map_or(true, |p| new_min < p))
+        })
+    }
+
+    /// Cancel a previously scheduled entry identified by its `data` pointer.
+    ///
+    /// Removes the entry whose `data` matches the given pointer. Returns `true`
+    /// if an entry was actually removed.
+    ///
+    /// This is safe to call from task context (wraps in `critical_section`).
+    pub fn cancel(&self, data: *mut ()) -> bool {
+        critical_section::with(|cs| {
+            let entries = unsafe { &mut *self.inner.borrow(cs).get() };
+            let mut i = 0;
+            while i < entries.len() {
+                if entries[i].data == data {
+                    entries.swap_remove(i);
+                    return true;
+                } else {
+                    i += 1;
+                }
+            }
+            false
         })
     }
 

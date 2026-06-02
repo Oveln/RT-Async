@@ -137,12 +137,18 @@ impl<F: Future + 'static> TaskStorage<F> {
                     this.f.drop_in_place();
                     *this.info.poll_fn.get() = Some(poll_exited);
                 }
-                this.info.state.despawn();
-                unsafe {
-                    if let Some(w) = (*this.join.waker.get()).take() {
-                        w.wake();
+                // Wake JoinHandle BEFORE despawn so the consumer reads the
+                // result before the task slot can be reused by a new spawn.
+                // Without this ordering, an interrupt could call spawn()
+                // between despawn() and wake(), overwriting join.result.
+                critical_section::with(|_| {
+                    this.info.state.despawn();
+                    unsafe {
+                        if let Some(w) = (*this.join.waker.get()).take() {
+                            w.wake();
+                        }
                     }
-                }
+                });
             }
             core::task::Poll::Pending => {}
         }

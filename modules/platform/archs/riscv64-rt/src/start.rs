@@ -40,9 +40,9 @@ core::arch::global_asm!(
     "__start:",
     "la gp, __global_pointer$",
     "la sp, __sstack",
-    "call __start_rust",
     #[cfg(feature = "clear_bss")]
     "call __clear_bss",
+    "call __start_rust",
     "j __rust_main"
 );
 

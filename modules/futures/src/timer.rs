@@ -25,8 +25,11 @@ use core::task::{Context, Poll, Waker};
 use fugit::Duration;
 use platform::{TimerChip, TimerChipImpl};
 
-/// Global timer queue (capacity 8).
-pub static TIMER_QUEUE: ::timer::TimerQueue<8> = ::timer::TimerQueue::new();
+/// Global timer queue (capacity 16).
+///
+/// Slots are shared between async `after()` futures and the timer-sched
+/// ISR-driven action scheduler.  16 entries × 24 bytes = 384 bytes total.
+pub static TIMER_QUEUE: ::timer::TimerQueue<16> = ::timer::TimerQueue::new();
 
 /// Nanosecond-precision duration type.
 pub type TimerDuration = Duration<u64, 1, 1_000_000_000>;
@@ -64,6 +67,9 @@ impl Future for TimerDelay {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         if TimerChipImpl::now_ticks() >= self.deadline {
+            // Timer already expired — cancel any pending entry and clear registered
+            // flag so Drop does not try to cancel again.
+            self.registered = false;
             Poll::Ready(())
         } else {
             if !self.registered {
@@ -77,6 +83,16 @@ impl Future for TimerDelay {
                 self.registered = true;
             }
             Poll::Pending
+        }
+    }
+}
+
+impl Drop for TimerDelay {
+    fn drop(&mut self) {
+        if self.registered {
+            let data = core::ptr::addr_of_mut!(self.waker) as *mut ();
+            TIMER_QUEUE.cancel(data);
+            self.registered = false;
         }
     }
 }
