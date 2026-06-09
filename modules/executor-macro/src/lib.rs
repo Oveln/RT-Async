@@ -209,7 +209,7 @@ pub fn task(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// [`platform::PEND_MARKER`]: platform::PEND_MARKER
 /// [interrupt]: executor::interrupt
 #[proc_macro_attribute]
-pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn main(attr: TokenStream, item: TokenStream) -> TokenStream {
     let f = parse_macro_input!(item as ItemFn);
 
     if f.sig.asyncness.is_some() {
@@ -229,6 +229,11 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .to_compile_error()
         .into();
     }
+
+    let log_level = match parse_log_level(&attr.to_string()) {
+        Ok(l) => l,
+        Err(e) => return e.to_compile_error().into(),
+    };
 
     // Extract exactly one parameter: the spawner
     let inputs = &f.sig.inputs;
@@ -272,7 +277,7 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #no_mangle_attr
         pub unsafe extern "C" fn __rust_main() -> ! {
             unsafe {
-                platform::init();
+                platform::init(log::LevelFilter::#log_level);
 
                 let ptr = ::core::ptr::addr_of_mut!(__SPAWNER)
                     .cast::<executor::spawner::Spawner<#n_lit>>();
@@ -494,4 +499,23 @@ pub fn interrupt(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     expanded.into()
+}
+
+fn parse_log_level(attr: &str) -> Result<proc_macro2::Ident, syn::Error> {
+    let s = attr.trim();
+    if s.is_empty() {
+        return Ok(proc_macro2::Ident::new("Info", proc_macro2::Span::call_site()));
+    }
+    match s {
+        "trace" => Ok(proc_macro2::Ident::new("Trace", proc_macro2::Span::call_site())),
+        "debug" => Ok(proc_macro2::Ident::new("Debug", proc_macro2::Span::call_site())),
+        "info" => Ok(proc_macro2::Ident::new("Info", proc_macro2::Span::call_site())),
+        "warn" => Ok(proc_macro2::Ident::new("Warn", proc_macro2::Span::call_site())),
+        "error" => Ok(proc_macro2::Ident::new("Error", proc_macro2::Span::call_site())),
+        "off" => Ok(proc_macro2::Ident::new("Off", proc_macro2::Span::call_site())),
+        _ => Err(syn::Error::new(
+            proc_macro2::Span::call_site(),
+            format!("invalid log level: {s} (expected: trace, debug, info, warn, error, off)"),
+        )),
+    }
 }

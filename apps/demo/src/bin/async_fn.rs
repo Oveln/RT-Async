@@ -51,7 +51,7 @@ async fn task2() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rust_main() -> ! {
     unsafe {
-        platform::init();
+        platform::init(log::LevelFilter::Info);
         log::info!("demo: hello from rt-async on riscv64!");
 
         let ptr = core::ptr::addr_of_mut!(SPAWNER).cast::<Spawner<4>>();

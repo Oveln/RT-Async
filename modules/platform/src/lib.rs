@@ -27,8 +27,8 @@ pub use logger::Logger;
 
 static LOGGER: Logger = Logger::new();
 
-pub fn init() {
-    let _ = LOGGER.init(log::LevelFilter::Trace);
+pub fn init(max_level: log::LevelFilter) {
+    let _ = LOGGER.init(max_level);
 }
 
 #[cfg(feature = "riscv64")]
@@ -36,6 +36,7 @@ pub unsafe fn start() {
     unsafe {
         TimerChipImpl::enable_timer_irq();
         arch::enable_msi();
+        arch::enable_mei();
         arch::enable_interrupts();
     }
 }

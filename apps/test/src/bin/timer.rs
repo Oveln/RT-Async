@@ -31,7 +31,7 @@ pub unsafe extern "C" fn MachineSoft(_tf: &mut platform::arch::TrapFrame) {}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rust_main() {
-    platform::init();
+    platform::init(log::LevelFilter::Info);
 
     // 测试 1: now_ticks() 单调递增
     let t0 = TimerChipImpl::now_ticks();

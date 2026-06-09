@@ -78,7 +78,7 @@ async fn yield_n<const N: u32>(label: &'static str) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rust_main() -> ! {
     unsafe {
-        platform::init();
+        platform::init(log::LevelFilter::Info);
         log::info!("demo: preempt test — priority preemption & interleaving");
         log::info!("expected order:");
         log::info!("  1. mid(1) runs & completes (highest prio among initial ready tasks)");

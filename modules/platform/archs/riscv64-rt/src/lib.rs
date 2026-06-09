@@ -41,6 +41,11 @@ pub unsafe fn enable_msi() {
     unsafe { riscv::register::mie::set_msoft() };
 }
 
+/// Enable machine external interrupt (sets mie.MEIE).
+pub unsafe fn enable_mei() {
+    unsafe { riscv::register::mie::set_mext() };
+}
+
 pub fn idle() {
     riscv::asm::wfi();
 }
