@@ -11,6 +11,11 @@
 EXTERN(_default_abort);
 PROVIDE(abort = _default_abort);
 
+/* chip 板级初始化钩子默认实现：arch 提供 `_default_board_init`（空），
+ * chip crate（如 chip-k3-rt24）用 `#[no_mangle] _board_init` 强定义覆盖。
+ * 机制与上方 abort / 下方异常处理器一致（strong-over-PROVIDE）。 */
+PROVIDE(_board_init = _default_board_init);
+
 PROVIDE(_pre_init_trap = _default_abort);
 
 EXTERN(_default_start_trap);
