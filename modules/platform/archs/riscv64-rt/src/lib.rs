@@ -76,14 +76,14 @@ pub extern "C" fn _default_setup_interrupts() {}
 /// （mtvec 已在 `__start_rust` 中设置，故此处不重复。）
 pub fn arch_init() {}
 
-/// chip 板级初始化钩子：原生弱符号（空函数体）。
-///
-/// platform 不依赖任何 chip crate，故无法直接调用其函数；改用弱符号——
-/// chip crate（如 chip-k3-rt24）用 `#[no_mangle] extern "C" fn _board_init()`
-/// 强定义覆盖。不覆盖时（QEMU/std-chip）调用落到此空实现，无副作用。
-///
-/// 链接行为已实测：强定义存在时 `nm` 显示 `T`（强）并解析到 chip 实现；
-/// 不存在时显示 `W`（弱）仍链接成功。
+// chip 板级初始化钩子：原生弱符号（空函数体）。
+//
+// platform 不依赖任何 chip crate，故无法直接调用其函数；改用弱符号——
+// chip crate（如 chip-k3-rt24）用 `#[no_mangle] extern "C" fn _board_init()`
+// 强定义覆盖。不覆盖时（QEMU/std-chip）调用落到此空实现，无副作用。
+//
+// 链接行为已实测：强定义存在时 `nm` 显示 `T`（强）并解析到 chip 实现；
+// 不存在时显示 "W"（弱）仍链接成功。
 core::arch::global_asm!(
     ".section .text",
     ".weak _board_init",

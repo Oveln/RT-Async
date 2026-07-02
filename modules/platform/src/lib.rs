@@ -27,7 +27,7 @@ pub use logger::Logger;
 
 static LOGGER: Logger = Logger::new();
 
-extern "C" {
+unsafe extern "C" {
     fn _board_init(); // 弱符号：arch 提供 .weak 空定义，chip crate 用强 #[no_mangle] 覆盖
 }
 
