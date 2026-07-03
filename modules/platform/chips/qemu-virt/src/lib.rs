@@ -24,6 +24,8 @@ pub struct QemuVirt;
 
 #[extern_trait]
 impl Chip for QemuVirt {
+    fn board_init() {}
+
     fn shutdown() -> ! {
         unsafe {
             core::ptr::write_volatile(SIFIVE_TEST_BASE as *mut u32, 0x5555);

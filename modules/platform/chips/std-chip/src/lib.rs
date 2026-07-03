@@ -8,6 +8,8 @@ pub struct StdChip;
 
 #[extern_trait]
 impl Chip for StdChip {
+    fn board_init() {}
+
     fn shutdown() -> ! {
         exit(0)
     }
