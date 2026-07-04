@@ -14,7 +14,7 @@ export default withMermaid(withSidebar(
         { text: '文档', link: '/docs/'},
         { text: '技术报告', link: '/技术报告/' },
         { text: '周报', link: '/周报-Oveln/' },
-        { text: '项目计划', link: '/项目计划/项目计划-20251111'}
+        { text: '项目计划', link: '/项目计划/'}
       ],
 
       socialLinks: [
