@@ -9,12 +9,13 @@
 //! [`DRIVERS`] 列表，命中后调 [`Driver::probe`]。
 //!
 //! # 设计
-//! - `&'static dyn Trait` 是胖指针（数据指针 + vtable 指针），单个 `usize`
-//!   放不下。这里用 `MaybeUninit<&'static dyn Trait>` 承载完整胖指针，配
-//!   `AtomicU8` 状态机（参照 [`crate::dtb`]）。单 hart 串行 probe 场景下
-//!   安全；`Release`/`Acquire` 序保证初始化结果对后续读者可见。
-//! - 板级 driver 列表 `DRIVERS` 同理（`&'static [&'static dyn Driver]` 是胖指针），
-//!   由板级 glue 经 [`set_drivers`] 注入（避免 platform 反向依赖 driver crate）。
+//! 所有全局状态都用 [`Slot<T>`] 承载——`MaybeUninit<T>` 配 `AtomicU8` 状态机。
+//! `T` 通常是胖指针（`&'static dyn Trait` 或 `&'static [&'static dyn Driver]`），
+//! 单个 `usize` 放不下，故用 `MaybeUninit` 承载完整胖指针。`UnsafeCell` 提供
+//! 内部可变性（让 `&self` 能在 init 期写入），`Release`/`Acquire` 序保证初始化
+//! 结果对后续读者可见。单 hart 串行 probe 场景下安全；多 hart 需保证仅一个
+//! hart 调用 `set`。板级 driver 列表（`&'static [&'static dyn Driver]`）同理，
+//! 由板级 glue 经 [`set_drivers`] 注入（避免 platform 反向依赖 driver crate）。
 //!
 //! [`ChipImpl`]: crate::ChipImpl
 //! [`TimerChipImpl`]: crate::TimerChipImpl
@@ -23,7 +24,7 @@ use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 
 use fdt_parser::Fdt;
-use portable_atomic::{AtomicU8, AtomicUsize, Ordering};
+use portable_atomic::{AtomicU8, Ordering};
 
 use crate::device::{Driver, Ipi, Reset, Serial, Timer};
 
@@ -32,13 +33,13 @@ const STATE_UNINIT: u8 = 0;
 /// 已就绪。
 const STATE_READY: u8 = 1;
 
-/// 一个 `&'static dyn Trait` 槽位：`UnsafeCell<MaybeUninit>` 承载胖引用 +
-/// 原子状态机。
+/// 一个 `T` 的全局槽位：`UnsafeCell<MaybeUninit>` 承载数据 + 原子状态机。
 ///
-/// `T` 是引用类型本身（如 `&'static dyn Serial`）。`MaybeUninit<T>` 承载完整
-/// 胖指针（数据 + vtable，16 字节），`UnsafeCell` 提供内部可变性（让 `&self`
-/// 能写入），`AtomicU8` 状态机保证初始化结果对读者可见。单 hart 串行 probe
-/// 场景下安全；多 hart 需保证仅一个 hart 调用 `set`。
+/// `T` 通常是胖指针类型（如 `&'static dyn Serial` 或
+/// `&'static [&'static dyn Driver]`）。`MaybeUninit<T>` 承载完整胖指针
+/// （数据 + vtable，16 字节），`UnsafeCell` 提供内部可变性（让 `&self`
+/// 能在 init 期写入），`AtomicU8` 状态机保证初始化结果对读者可见。
+/// 单 hart 串行 init 场景下安全；多 hart 需保证仅一个 hart 调用 `set`。
 struct Slot<T> {
     state: AtomicU8,
     val: UnsafeCell<MaybeUninit<T>>,
@@ -57,7 +58,7 @@ impl<T> Slot<T> {
     }
 
     fn set(&self, dev: T) {
-        // SAFETY: 写入 MaybeUninit。单 hart 串行 probe 下无并发写；状态机
+        // SAFETY: 写入 MaybeUninit。单 hart 串行 init 下无并发写；状态机
         // 用 Release 发布，确保胖指针对后续 Acquire 读者可见。UnsafeCell 提供
         // &self → *mut 的内部可变性。
         unsafe {
@@ -87,12 +88,8 @@ static TIMER: Slot<&'static dyn Timer> = Slot::new();
 static IPI: Slot<&'static dyn Ipi> = Slot::new();
 /// 复位/关机设备。
 static RESET: Slot<&'static dyn Reset> = Slot::new();
-
-/// 板级提供的 driver 列表。`&'static [&'static dyn Driver]` 是胖指针，
-/// 同样用 MaybeUninit + 状态机承载。
-static DRIVERS_PTR: AtomicUsize = AtomicUsize::new(0);
-static DRIVERS_LEN: AtomicUsize = AtomicUsize::new(0);
-static DRIVERS_READY: AtomicU8 = AtomicU8::new(STATE_UNINIT);
+/// 板级提供的 driver 列表（`&'static [&'static dyn Driver]` 是胖指针）。
+static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
 
 /// 注册 console 设备。由 Serial driver 的 probe 调用。
 pub fn set_console(dev: &'static dyn Serial) {
@@ -114,14 +111,26 @@ pub fn set_reset(dev: &'static dyn Reset) {
     RESET.set(dev);
 }
 
-/// 取默认 console。若未注册则 panic（console 不可缺）。
+/// 取默认 console。
+///
+/// 若未注册（boot 未跑完或 Serial driver probe 失败），返回一个静默丢弃的
+/// fallback（no-op）。这样 panic handler 等早期路径在 console 缺失时不会因
+/// 二次 panic 把日志通路打死。上层正常使用时 console 已 probe，fallback 不触发。
 pub fn console() -> &'static dyn Serial {
-    *CONSOLE
-        .get()
-        .expect("console: no Serial device registered")
+    match CONSOLE.get() {
+        Some(c) => *c,
+        None => &NOOP_SERIAL,
+    }
 }
 
-/// 取默认 timer。若未注册则 panic。
+/// Fallback console：未 probe 时静默丢弃，避免 panic → put_str → console() 二次 panic。
+struct NoOpSerial;
+impl Serial for NoOpSerial {
+    fn write(&self, _buf: &[u8]) {}
+}
+static NOOP_SERIAL: NoOpSerial = NoOpSerial;
+
+/// 取默认 timer。若未注册则 panic（timer 不可缺，无静默降级语义）。
 pub fn timer() -> &'static dyn Timer {
     *TIMER.get().expect("timer: no Timer device registered")
 }
@@ -136,15 +145,12 @@ pub fn reset() -> &'static dyn Reset {
     *RESET.get().expect("reset: no Reset device registered")
 }
 
-/// 设置板级 driver 列表。由板级 glue 在 `board_init` 早期调用。
+/// 设置板级 driver 列表。由板级 glue 在 `board_init` 早期调用，`boot()` 之前。
 ///
-/// # Safety
-/// `drivers` 必须是 'static 有效引用，且仅调用一次（boot 前）。
-pub unsafe fn set_drivers(drivers: &'static [&'static dyn Driver]) {
-    // 切片引用是胖指针（data + len）。拆成 data 指针 + len 两个原子存。
-    DRIVERS_PTR.store(drivers.as_ptr() as usize, Ordering::Release);
-    DRIVERS_LEN.store(drivers.len(), Ordering::Release);
-    DRIVERS_READY.store(STATE_READY, Ordering::Release);
+/// `drivers` 必须是 `'static` 有效切片，且仅调用一次。单 hart 串行模型下，
+/// `boot()` 在本函数返回后才运行，故胖指针的发布由 `Slot` 的 Release 序保证。
+pub fn set_drivers(drivers: &'static [&'static dyn Driver]) {
+    DRIVERS.set(drivers);
 }
 
 /// 遍历设备树实例化所有 driver。
@@ -156,37 +162,20 @@ pub unsafe fn set_drivers(drivers: &'static [&'static dyn Driver]) {
 /// # Panics
 /// 若 [`set_drivers`] 未调用则 panic。
 pub fn boot() {
-    if DRIVERS_READY.load(Ordering::Acquire) != STATE_READY {
-        panic!("driver::boot: set_drivers() not called");
-    }
-    let ptr = DRIVERS_PTR.load(Ordering::Acquire) as *const &dyn Driver;
-    let len = DRIVERS_LEN.load(Ordering::Acquire);
-    // SAFETY: 由 set_drivers 写入，源自 'static 切片引用；data 与 len 都对齐可见。
-    let drivers: &[&dyn Driver] = unsafe { core::slice::from_raw_parts(ptr, len) };
+    let drivers: &&[&dyn Driver] = DRIVERS
+        .get()
+        .expect("driver::boot: set_drivers() not called");
 
     let fdt: &Fdt<'static> = crate::dtb::dt();
 
     for node in fdt.all_nodes() {
-        // 节点的 compatible 可能多个，driver 的 compatible 列表也可能多个；
-        // 任一命中即 probe。先收集节点 compatible 到栈上小缓冲避免迭代器 Clone。
-        let mut node_caps: [&str; 8] = [""; 8];
-        let mut count = 0usize;
-        for nc in node.compatibles() {
-            if count < node_caps.len() {
-                node_caps[count] = nc;
-                count += 1;
-            }
-        }
-        if count == 0 {
-            continue;
-        }
-        let node_caps = &node_caps[..count];
-
-        for drv in drivers {
-            let drv_compatibles = drv.compatible();
-            let matched = node_caps
-                .iter()
-                .any(|nc| drv_compatibles.iter().any(|dc| *dc == *nc));
+        // 对每个 driver 检查节点的 compatible 列表是否有任一命中。
+        // node.compatibles() 返回的迭代器每次调用都从头开始，无需收集到栈缓冲，
+        // 也无 compatible 个数上限。
+        for drv in *drivers {
+            let matched = node
+                .compatibles()
+                .any(|nc| drv.compatible().iter().any(|dc| *dc == nc));
             if matched {
                 drv.probe(&node);
             }

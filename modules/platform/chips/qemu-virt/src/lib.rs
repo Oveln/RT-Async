@@ -31,8 +31,7 @@ impl Chip for QemuVirt {
         // 2. 注册板级 driver 列表（用 platform 内置默认列表）。
         //    未来 K3 等板可在此替换为自定义 driver 列表。
         let drivers = platform::drivers::default_drivers();
-        // SAFETY: drivers 是 'static 切片；board_init 在调度器启动前串行调用一次。
-        unsafe { platform::driver::set_drivers(drivers) };
+        platform::driver::set_drivers(drivers);
 
         // 3. 遍历 DT 实例化 driver（probe 各节点 → 填充 registry 槽位）。
         platform::driver::boot();
