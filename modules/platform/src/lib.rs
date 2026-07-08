@@ -23,9 +23,20 @@ pub use arch::{disable_interrupts, enable_interrupts, idle};
 #[cfg(feature = "riscv64")]
 pub use riscv64_rt as arch;
 
+pub mod device;
+pub mod driver;
+pub mod drivers;
 pub mod dtb;
 pub mod logger;
 pub use logger::Logger;
+
+// 便捷 re-export：上层（chip shim / executor / futures / apps）通过
+// `platform::{console, timer, ipi, reset, Driver, Serial, ...}` 直接取用，
+// 无需写全路径。
+pub use device::{Driver, Ipi, Reset, Serial, Timer};
+pub use driver::{
+    boot, console, ipi, reset, timer, set_console, set_drivers, set_ipi, set_reset, set_timer,
+};
 
 static LOGGER: Logger = Logger::new();
 

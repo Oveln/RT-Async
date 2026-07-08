@@ -1,6 +1,14 @@
-//! # QEMU Virt Chip 实现
+//! # QEMU Virt Chip 实现（转发 shim）
 //!
-//! 为 QEMU `virt` 平台（RISC-V 64）提供 [`Chip`] 和 [`TimerChip`] 的具体实现。
+//! 为 QEMU `virt` 平台（RISC-V 64）提供 [`Chip`] 和 [`TimerChip`] 的实现。
+//!
+//! 本 crate 已不再硬编码 MMIO 逻辑——具体外设驱动（NS16550A / CLINT timer /
+//! CLINT msip / sifive test）抽到 `platform::drivers` 内部模块，由设备树 probe
+//! 实例化。这里仅保留 `extern_trait` 静态分发入口，方法体转发到
+//! `platform::driver` registry（console / timer / ipi / reset），保持上层
+//! （executor / futures / apps）调用 `ChipImpl::*` / `TimerChipImpl::*` 零改动。
+//!
+//! [`Chip`] / [`TimerChip`] trait 定义在 `platform::lib`，不在此改动。
 
 #![no_std]
 #![allow(unreachable_code)]
@@ -8,68 +16,64 @@
 use extern_trait::extern_trait;
 use platform::{Chip, TimerChip};
 
-/// QEMU virt 串口寄存器基址（NS16550A 兼容 UART）。
-const UART_BASE: usize = 0x1000_0000;
-/// QEMU virt 关机寄存器基址（SiFive Test 设备）。
-const SIFIVE_TEST_BASE: usize = 0x100_000;
-/// CLINT msip 寄存器（hart 0）。
-const CLINT_MSIP: usize = 0x2000_000;
-/// CLINT mtimecmp 寄存器（hart 0）。
-const CLINT_MTIMECMP: usize = 0x200_4000;
-/// CLINT mtime 寄存器。
-const CLINT_MTIME: usize = 0x200_BFF8;
-
-/// QEMU virt 平台的 Chip 实现。
+/// QEMU virt 平台的 Chip 实现（转发到 driver registry）。
 pub struct QemuVirt;
 
 #[extern_trait]
 impl Chip for QemuVirt {
     fn board_init() {
-        // 内嵌 rt-async 专属 DTB（子模块自包含模式）。
-        // 路径：src -> qemu-virt -> chips -> platform -> modules -> rt-async 根（5 级 ../）。
-        static RT_ASYNC_DTB: &[u8] = include_bytes!("../../../../../its/rt-async-qemu-virt.dtb");
+        // 1. 注入 rt-async 专属 DTB（子模块自包含模式）。
+        //    路径：src -> qemu-virt -> chips -> platform -> modules -> rt-async 根（5 级 ../）。
+        static RT_ASYNC_DTB: &[u8] =
+            include_bytes!("../../../../../its/rt-async-qemu-virt.dtb");
         platform::dtb::init_dtb(RT_ASYNC_DTB);
+
+        // 2. 注册板级 driver 列表（用 platform 内置默认列表）。
+        //    未来 K3 等板可在此替换为自定义 driver 列表。
+        let drivers = platform::drivers::default_drivers();
+        // SAFETY: drivers 是 'static 切片；board_init 在调度器启动前串行调用一次。
+        unsafe { platform::driver::set_drivers(drivers) };
+
+        // 3. 遍历 DT 实例化 driver（probe 各节点 → 填充 registry 槽位）。
+        platform::driver::boot();
     }
 
     fn shutdown() -> ! {
-        unsafe {
-            core::ptr::write_volatile(SIFIVE_TEST_BASE as *mut u32, 0x5555);
-        }
-        loop {}
+        platform::driver::reset().shutdown()
     }
 
     fn put_str(s: &str) {
-        for &byte in s.as_bytes() {
-            unsafe {
-                core::ptr::write_volatile(UART_BASE as *mut u8, byte);
-            }
-        }
+        platform::driver::console().write(s.as_bytes());
     }
 
     unsafe fn pend() {
-        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 1) };
+        // SAFETY: 调用者（platform::pend）保证上下文合适。
+        unsafe { platform::driver::ipi().send() };
     }
 
     unsafe fn clear_pend() {
-        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 0) };
+        // SAFETY: ISR 早期调用，关中断上下文。
+        unsafe { platform::driver::ipi().clear() };
     }
 }
 
 #[extern_trait]
 impl TimerChip for QemuVirt {
     fn freq_hz() -> u32 {
-        10_000_000
+        platform::driver::timer().freq_hz()
     }
 
     fn now_ticks() -> u64 {
-        unsafe { core::ptr::read_volatile(CLINT_MTIME as *const u64) }
+        platform::driver::timer().now()
     }
 
     fn set_deadline(tick: u64) {
-        unsafe { core::ptr::write_volatile(CLINT_MTIMECMP as *mut u64, tick) };
+        platform::driver::timer().set_deadline(tick)
     }
 
     unsafe fn enable_timer_irq() {
+        // 先把 deadline 推到最远，避免立刻触发；再开 mie.MTIE。
+        // MTIE 属 arch 级配置，不属于 driver model，保留在此。
         Self::set_deadline(u64::MAX);
         unsafe { riscv::register::mie::set_mtimer() };
     }
