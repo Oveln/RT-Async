@@ -11,4 +11,7 @@ portable-atomic = { version = "1", default-features = false }
 fdt-parser = "0.4.19"
 
 [features]
-riscv64 = ["dep:riscv64-rt"]
+# clear_bss 由 riscv64-rt 在 __start 早期清零 BSS（__sbss..__ebss）。
+# rt-async 经 QEMU loader 加载，BSS 是 NOLOAD（不初始化），driver model 的
+# 全局 static（STATE / FDT / Slot 等）依赖 BSS 为 0，故必须运行时清零。
+riscv64 = ["dep:riscv64-rt", "riscv64-rt/clear_bss"]
