@@ -386,29 +386,411 @@ impl TimerChip for QemuVirtRt {
 | MEDIUM | 主仓库 3 个 dead_code 警告 | `#[allow(dead_code)]` |
 | 注释 | SAFETY 论据循环论证、boot_cpuid_phys 推导未说明 | 改进注释 |
 
-## 后续工作
+## Phase 2: 去除 Chip/TimerChip，引入 Board trait
 
-当前 driver model 已覆盖 Serial/Timer/Ipi/Reset 四类设备。计划中的 Step 4 后续是 **dispatch_irq 外部中断路由**（PLIC IrqController driver）：
+### 动机
 
-- 引入 `IrqController` trait（claim/complete/enable）
-- PLIC 抽象为 driver，DT probe 时读 `interrupts` 属性建立 IRQ→设备绑定
-- `MachineExternal` 弱符号内填通用骨架：`claim → dispatch_irq(irq_id) → complete`
-- 统一 timer 的回调式（TimerQueue）与未来的设备 IRQ waker 式唤醒
+Step 4 完成后，`Chip`（5 方法：`board_init`/`shutdown`/`put_str`/`pend`/`clear_pend`）和 `TimerChip`（4 方法：`freq_hz`/`now_ticks`/`set_deadline`/`enable_timer_irq`）在 QEMU virt 平台的实现体已经**退化为纯转发 shim**：
 
-这部分是独立工作量，作为后续轮次。
+```rust
+// 两个 chip crate 的实现体里，所有方法都是这样一层转发
+fn put_str(s: &str) { platform::driver::console().write(s.as_bytes()); }
+fn shutdown() -> ! { platform::driver::reset().shutdown() }
+fn pend()          { unsafe { platform::driver::ipi().send() }; }
+// ...
+```
+
+`extern_trait` 的静态分发优势仍在，但 `Chip`/`TimerChip` 这种"把不相关的功能塞进一个 trait"的设计已经过时。重构目标：**删除这两个 trait，只保留极简 `Board` trait（仅 `fn init()` 一项），把其余方法全部迁移到 driver registry**。
+
+### 迁移映射
+
+| 旧方法 | 新调用方 |
+|---|---|
+| `ChipImpl::shutdown()` | `platform::reset().shutdown()` |
+| `ChipImpl::put_str(s)` | `platform::console().write(s.as_bytes())` |
+| `ChipImpl::pend()` | `platform::ipi().send()` |
+| `ChipImpl::clear_pend()` | `platform::ipi().clear()` |
+| `TimerChipImpl::freq_hz()` | `platform::timer().freq_hz()` |
+| `TimerChipImpl::now_ticks()` | `platform::timer().now()` |
+| `TimerChipImpl::set_deadline(t)` | `platform::timer().set_deadline(t)` |
+| `TimerChipImpl::enable_timer_irq()` | 拆为 `timer().set_deadline(MAX)` + `arch::enable_mtimer()`，在 `platform::start()` 内联 |
+
+### 架构变化
+
+```
+重构前                                    重构后
+──────                                    ──────
+#[extern_trait(pub ChipImpl)]             #[extern_trait(pub BoardImpl)]
+pub trait Chip { 5 methods }              pub trait Board { fn init(); }
+                                        
+#[extern_trait(pub TimerChipImpl)]        (TimerChip 删除)
+pub trait TimerChip { 4 methods }         
+                                        
+chip crate: impl Chip + TimerChip          chip crate: impl Board (仅 init)
+  ├─ board_init: DTB + drivers + boot       └─ init: DTB + drivers + boot + register_irq
+  ├─ put_str → 裸 MMIO
+  ├─ shutdown → 裸 MMIO                   platform::start(): 内联 enable_timer_irq
+  └─ ...                                    └─ timer().set_deadline + arch::enable_mtimer
+```
+
+`platform::init(log_level)` 签名不变、executor-macro codegen 零改动、`__rust_main` 不动。
+
+---
+
+## Phase 3: 中断分发机制（零抽象开销）
+
+### 三种 RISC-V 中断
+
+rt-async 涉及的中断有三条线，用途和机制各不相同：
+
+| | MachineSoft (MSIP) | MachineTimer (MTimer) | MachineExternal (MEI) |
+|---|---|---|---|
+| **信号源** | CLINT MSIP 寄存器 | CLINT mtimecmp | PLIC（多源汇聚） |
+| **使能** | `mie.MSIE` | `mie.MTIE` (**新增 arch::enable_mtimer**) | `mie.MEIE` |
+| **ISR 提供方** | executor-macro 强制强符号 | 用户 `#[executor::interrupt]` | **arch 强符号默认值** → dispatch |
+| **需要 register_irq？** | 否（单用途：调度器唤醒） | 否（单用途：定时器队列） | **是（PLIC 多源分发）** |
+| **App 侧 API** | 透明（waker 链自动触发） | `TimerDelay::new(t).await` | `SerialRx::new().await` |
+
+### 外部中断分发的零开销设计
+
+PLIC 是多源中断控制器，所有外设（UART、SPI、网卡等）共享一条 MachineExternal 线。分发层的核心是一个**以 IRQ 编号直接索引的静态数组**：
+
+```rust
+// platform/src/irq.rs
+pub type IrqHandler = unsafe fn(irq: u32);
+
+const MAX_IRQ: usize = 64;  // QEMU virt PLIC 53 源，64 留有余量
+static IRQ_TABLE: [AtomicUsize; MAX_IRQ] = [...] ;
+
+pub fn register_irq(irq: u32, handler: IrqHandler) {
+    IRQ_TABLE[irq].store(handler as usize, Release);  // 启动期注册
+}
+
+pub fn dispatch_external() {
+    let irq = intctl().claim();        // PLIC CLAIM（读）
+    if irq == 0 { complete(0); return; }
+    let handler = IRQ_TABLE[irq]       // O(1) 数组下标 → 函数指针
+        .load(Acquire);
+    if handler != 0 { handler(irq); }  // 调用 handler（fn 指针，无 vtable）
+    intctl().complete(irq);            // PLIC COMPLETE（写同一寄存器）
+}
+```
+
+**零开销证明**：
+
+| 操作 | 开销 | 说明 |
+|---|---|---|
+| 查找 | `IRQ_TABLE[irq]` → 一次 Load | O(1)，无哈希、无链表、无排序 |
+| 调用 | 函数指针 → RISC-V `jalr` | 无 vtable，与 `dyn Trait` 比省去两次间接 |
+| 注册 | `AtomicUsize::store(Release)` | 关中断上下文，单写者，无锁 |
+| 内存 | 64 × 8 = 512 字节 | 编译期确定，零堆分配 |
+
+**默认 MachineExternal**：arch crate 提供一个强符号 `__rt_machine_external`，link.x 通过 `PROVIDE(MachineExternal = __rt_machine_external)` 将其设为默认 handler。App **不再需要**手写 `#[executor::interrupt] fn MachineExternal`——只需 `register_irq` 注册即可。若 App 确实需要自定义 MachineExternal，仍可提供同名强符号覆盖（PROVIDE 是弱符号，强符号优先）。
+
+### 完整数据流：从外设中断到任务唤醒
+
+```
+UART 发送字节
+  → PLIC 判定优先级 + 使能
+  → hart1 MachineExternal 中断
+  → arch::MachineExternal → irq::dispatch_external()
+      irq = intctl().claim()            // PLIC CLAIM 读，例如 irq=12
+      handler = IRQ_TABLE[12]           // ns16550a::rx_handler
+      handler(12):                      // 调 handler
+        while let Some(b) = read_fifo() → ring.push(b)  // UART FIFO → 环形缓冲区
+        waker_slot.wake():                              // 唤醒等待任务
+          has_waker.swap(false) → waker.wake()
+            → wake_task → enqueue → platform::pend()
+            → MSIP[hart1] = 1 → MachineSoft → 调度器
+              → SerialRx::poll → ring.pop() → Ready(byte)
+      intctl().complete(12)             // PLIC COMPLETE 写
+```
+
+---
+
+## Phase 4: InterruptController trait + PLIC 驱动
+
+### InterruptController trait
+
+```rust
+pub trait InterruptController: Send + Sync {
+    fn enable_irq(&self, irq: u32);
+    fn disable_irq(&self, irq: u32);
+    fn set_priority(&self, irq: u32, prio: u32);
+    fn set_threshold(&self, thr: u32);
+    fn claim(&self) -> u32;
+    fn complete(&self, irq: u32);
+}
+```
+
+### PLIC 驱动（`drivers/plic_sifive.rs`）
+
+零大小单例 `Plic`，实现 `Driver`（DT 探测）+ `InterruptController`。
+
+```rust
+impl Driver for Plic {
+    fn compatible(&self) -> &'static [&'static str] { &["riscv,plic0"] }
+    fn probe(&self, node: &Node<'_>) {
+        let base = node.reg().next().expect("missing reg");
+        BASE.store(base.address, Release);
+        // context 从当前 hart id 推导。hart0 M-mode = 0, hart1 M-mode = 2。
+        let hart_id = riscv::register::mhartid::read();
+        CONTEXT.store(hart_id * 2, Release);
+        set_intctl(&PLIC);
+    }
+}
+```
+
+**不再硬编码 `context = 2`**：旧 chip crate 的 `mod plic` 手写了 `CONTEXT_BASE + 2*0x80` 等偏移。新驱动从 `mhartid * 2` 动态推导，hart0 和 hart1 共用同一份驱动代码。
+
+### 板级 IRQ 注册
+
+在 `Board::init` 里，`boot()` 实例化全部驱动后，板级负责把 IRQ 号与驱动 handler 绑定：
+
+```rust
+impl Board for QemuVirtRt {
+    fn init() {
+        locate_rtasync_dtb() → init_dtb → set_drivers → boot();
+        // boot 已完成，全部驱动就绪
+        platform::register_irq(UART1IRQ, ns16550a::rx_handler);
+        platform::intctl().enable_irq(UART1IRQ);
+        platform::intctl().set_priority(UART1IRQ, 2);
+    }
+}
+```
+
+---
+
+## Phase 5: 异步串口接收（SerialRx Future）
+
+### 驱动内置环形缓冲区
+
+NS16550A 驱动在 `probe` 时使能 FIFO + ERBFI（RX 中断），并在内部维护：
+
+```rust
+struct RxState {
+    head: AtomicU16,                          // ISR 写索引
+    tail: AtomicU16,                          // Task 读索引
+    buf: UnsafeCell<[u8; 256]>,              // 环形缓冲区
+    has_waker: AtomicBool,                    // Waker 槽占用标记
+    waker: UnsafeCell<MaybeUninit<Waker>>,   // Waker 槽
+}
+unsafe impl Sync for RxState {}
+static RX: RxState = ...;
+```
+
+### 公开 API
+
+| API | 调用方 | 功能 |
+|---|---|---|
+| `rx_handler(irq)` | IRQ 分发（ISR 上下文） | 排出 UART FIFO → push ring → wake task |
+| `rx_poll(cx)` | `SerialRx::poll`（Task 上下文） | 经典的 disable→register waker→recheck→enable 临界区模式 |
+| `read()` → `Option<u8>` | 轮询 App | 读硬件 RBR（不经过 ring） |
+| `has_data()` → `bool` | 轮询 App | 读硬件 LSR.DR |
+| `write(&[u8])` | 任何上下文 | 逐字节写 THR |
+
+### SerialRx Future
+
+```rust
+// futures/serial.rs
+pub struct SerialRx;
+impl Future for SerialRx {
+    type Output = u8;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u8> {
+        platform::drivers::serial_ns16550a::rx_poll(cx)
+    }
+}
+```
+
+**rx_poll 的临界区模式**（与 `uart_wait.rs` 一致）：
+
+1. **快速路径**：ring 非空 → 立即 Pop 返回 Ready
+2. **关中断**，注册 cx.waker()
+3. **重检 ring**：若 ISR 在注册间隙推入字节 → 取字节、拆回 waker、开中断、返回 Ready
+4. **开中断**，返回 Pending
+
+### App 对比
+
+```rust
+// ── 重构前（console_interrupt.rs，~230 行）──
+#[executor::interrupt]
+fn MachineExternal(_tf: &mut TrapFrame) {
+    let irq = plic_claim();
+    if irq == UART1_IRQ {
+        while chip::uart_has_data() {
+            let byte = chip::uart_read_byte();
+            uart_wait::push_byte(byte);
+        }
+        uart_wait::notify_from_isr();
+    }
+    plic_complete(irq);
+}
+async fn task_console() {
+    loop {
+        let byte = uart_wait::WaitForByte::new().await;
+        // 处理...
+    }
+}
+
+// ── 重构后（console_interrupt.rs，~50 行）──
+async fn task_console() {
+    loop {
+        let byte = futures::serial::SerialRx::new().await;
+        // 处理...
+    }
+}
+```
+
+**无需 MachineExternal ISR、无需环形缓冲区、无需 PLIC 算术、无需 Waker 槽管理。**
+
+---
+
+## 完整启动流程
+
+```
+__rust_main (executor-macro 生成)
+  → platform::init(log_level)
+      → LOGGER.init        ← 注册 log 回调（写 console，此时 console 尚未就绪，log 不输出）
+      → arch::arch_init    ← mtvec 等 arch 初始化（已在 __start 中设置）
+      → BoardImpl::init()  ← extern_trait 静态分发到板级实现
+          │
+          │  [子模块 qemu-virt]
+          │    init_dtb(include_bytes!("../../its/rt-async-qemu-virt.dtb"))
+          │    set_drivers(default_drivers())
+          │    boot()
+          │
+          │  [主仓库 chip-qemu-virt-rt]
+          │    locate_rtasync_dtb()   ← esos 同款扫描 0x83000000
+          │    init_dtb(dtb)
+          │    set_drivers(default_drivers())
+          │    boot()
+          │      ├─ probe NS16550A  → set_console(&INSTANCE)
+          │      ├─ probe PLIC      → set_intctl(&PLIC)
+          │      ├─ probe CLINT     → set_timer(&INSTANCE)
+          │      ├─ probe MSIP      → set_ipi(&INSTANCE)
+          │      └─ probe SiFive    → set_reset(&INSTANCE)
+          │    register_irq(UART1IRQ, ns16550a::rx_handler)
+          │    intctl().enable_irq(UART1IRQ)
+          │    intctl().set_priority(UART1IRQ, 2)
+          │
+          │  [std-chip (host 单测)]
+          │    set_console(&STD_SERIAL)   ← print!
+          │    set_timer(&STD_TIMER)      ← stub
+          │    set_reset(&STD_RESET)      ← exit(0)
+          │    set_ipi(&STD_IPI)          ← no-op
+          │
+          └── 返回 platform::init，driver registry 全部就绪
+
+  → 用户 async fn main()  ← spawner.run 执行应用代码
+  → platform::start()     ← 应用代码返回后
+      timer().set_deadline(u64::MAX)  ← 推远定时器截止
+      arch::enable_mtimer()           ← 开 MachineTimer 中断
+      arch::enable_msi()              ← 开 MachineSoft 中断
+      arch::enable_mei()              ← 开 MachineExternal 中断
+      arch::enable_interrupts()       ← 开全局中断 (mstatus.MIE)
+  → loop { arch::idle() }  ← WFI 等待中断，调度器接管
+```
+
+---
+
+## 完整中断分发流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  RISC-V 中断线                                              │
+├──────────────────┬──────────────────┬───────────────────────┤
+│  MachineSoft     │  MachineTimer    │  MachineExternal      │
+│  (hart MSIP)     │  (CLINT mtimecmp)│  (PLIC → 多源)        │
+│                  │                  │                        │
+│  executor-macro  │  #[interrupt]    │  arch 强符号默认值    │
+│  强制强符号      │  覆盖弱符号       │  __rt_machine_external │
+│       ↓          │       ↓          │       ↓                │
+│  __Inner_MS      │  handle_timer    │  dispatch_external()  │
+│  + clear_pend    │  _isr()          │       ↓                │
+│  + 调度器        │       ↓          │  claim()              │
+│                  │  timer().now()   │  IRQ_TABLE[irq]       │
+│                  │  queue.dequeue   │  handler(irq)         │
+│                  │  timer().set_    │  complete()           │
+│                  │  deadline()      │                        │
+│  ←──── Waker 链 ──→                 │  ←──── Waker 链 ──→  │
+│                  │                  │                        │
+│  API: 透明       │  API:            │  API:                 │
+│  (waker 自动     │  after().await   │  SerialRx::new()     │
+│   触发调度器)    │                   │       .await          │
+└──────────────────┴──────────────────┴───────────────────────┘
+```
+
+---
+
+## 更新后的驱动注册表
+
+```rust
+// driver.rs — 全局 Slot<T> 槽位
+static CONSOLE: Slot<&'static dyn Serial> = ...;
+static TIMER:   Slot<&'static dyn Timer>  = ...;
+static IPI:     Slot<&'static dyn Ipi>    = ...;
+static RESET:   Slot<&'static dyn Reset>  = ...;
+static INTC:    Slot<&'static dyn InterruptController> = ...;  // 新增
+```
+
+| 槽位 | 类型 | 驱动 | compatible |
+|---|---|---|---|
+| CONSOLE | `&dyn Serial` | NS16550A | `ns16550a` |
+| TIMER | `&dyn Timer` | CLINT Timer | `riscv,clint0` |
+| IPI | `&dyn Ipi` | CLINT MSIP | `riscv,clint0-msip` |
+| RESET | `&dyn Reset` | SiFive Test | `sifive,test1` |
+| **INTC** (新) | `&dyn InterruptController` | PLIC | `riscv,plic0` |
+
+---
+
+## 驱动组织：平台内置 + Chip 追加
+
+`platform::drivers::default_drivers()` 返回全部 5 个内置驱动。chip crate 可构造自己的 `&'static [&'static dyn Driver]` 切片，在默认列表基础上追加独有驱动后传给 `set_drivers()`。
+
+加新驱动的步骤：
+
+```rust
+// 1. drivers/my_driver.rs — impl Driver + 功能 trait
+// 2. drivers/mod.rs — pub mod + pub use
+// 3. 加入 default_drivers() 数组
+```
+
+**无宏、无 link section、无注册函数。** 加一个驱动 = 写 `impl Driver` + 加进数组。
+
+---
+
+## K3 状态
+
+`chip-k3-rt24` 和 `apps/rt-async-k3` **本轮暂移出 workspace**。K3 没有 DTB、没有 PLIC、没有 driver registry，直接用 `clock::early_init()` + `uart::putc` 做裸 MMIO 初始化。移除 Chip trait 后 K3 需要一个 `Board` impl + `Serial` wrapper 来保持编译，但完整的驱动模型适配将在后续轮次完成。
+
+---
+
+## 变更规模
+
+| 轮次 | 子仓库 | 主仓库 |
+|---|---|---|
+| Phase 1-2 (DTB + driver model + Chip shim) | +796 / -30 行 | +241 / -26 行 |
+| Phase 3-5 (Board trait + IRQ dispatch + SerialRX) | +657 / -203 行 | +53 / -250 行 |
+| **总计** | **~30 文件变更** | **~8 文件变更** |
+
+---
 
 ## 提交记录
 
 ```
-子模块 feat/driver-model-dtb:
+子仓库 feat/driver-model-dtb:
   b7d1b87  Step1: DTB 解析层 + 子模块内嵌 handoff
   1762977  Step2: driver model + registry + ChipImpl/TimerChipImpl shim
   f9340f1  CLINT timer/ipi hart 感知偏移
   1018f11  fix: riscv64 feature 启用 clear_bss (根因修复)
   0a2a63d  refactor: 代码审阅修复
+  34a4631  chore: 简化工程复杂度 (H3 freq_hz 回退 + 删 NoOpSerial + dtb 简化)
+  d2d3ede  refactor: 移除 Chip/TimerChip trait + 中断分发 + 异步串口 RX
 
 主仓库 feat/rt-async-driver-model:
   51d3205  Step3: esos 同款 DTB handoff + driver model 接线
   f616eb6  refactor: 代码审阅修复 + 注释改进
   afe7efe  test: timer async heartbeat (Step4 验收)
+  9d82e6e  chore: bump rt-async submodule + 移除 K3 工作空间
+  93d4ff1  refactor: Board trait + 驱动模型完整化 (中断分发 + 异步串口)
 ```
