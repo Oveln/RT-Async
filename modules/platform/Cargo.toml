@@ -8,6 +8,7 @@ extern-trait = "0.4.3"
 riscv64-rt = { path = "archs/riscv64-rt", optional = true }
 log = { version = "0.4", default-features = false }
 portable-atomic = { version = "1", default-features = false }
+fdt-parser = "0.4.19"
 
 [features]
 riscv64 = ["dep:riscv64-rt"]

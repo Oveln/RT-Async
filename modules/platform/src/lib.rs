@@ -23,6 +23,7 @@ pub use arch::{disable_interrupts, enable_interrupts, idle};
 #[cfg(feature = "riscv64")]
 pub use riscv64_rt as arch;
 
+pub mod dtb;
 pub mod logger;
 pub use logger::Logger;
 

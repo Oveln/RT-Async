@@ -1,0 +1,48 @@
+/dts-v1/;
+/ {
+    #address-cells = <2>;
+    #size-cells = <2>;
+    model = "ov,rt-async-qemu-virt";
+    compatible = "ov,rt-async";
+
+    chosen {
+        stdout-path = "/serial@10000000";
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <10000000>;
+        cpu@0 {
+            device_type = "cpu";
+            reg = <0>;
+            compatible = "riscv";
+        };
+    };
+
+    serial@10000000 {
+        compatible = "ns16550a";
+        reg = <0 0x10000000 0 0x100>;
+        clock-frequency = <3686400>;
+    };
+
+    timer@2000000 {
+        compatible = "riscv,clint0";
+        reg = <0 0x02000000 0 0x10000>;
+    };
+
+    ipi@2000000 {
+        compatible = "riscv,clint0-msip";
+        reg = <0 0x02000000 0 0x10000>;
+    };
+
+    reset@100000 {
+        compatible = "sifive,test1";
+        reg = <0 0x0100000 0 0x1000>;
+    };
+
+    shm@88000000 {
+        compatible = "ov,rt-async-shm";
+        reg = <0 0x88000000 0 0x11000>;
+    };
+};

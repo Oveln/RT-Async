@@ -24,7 +24,12 @@ pub struct QemuVirt;
 
 #[extern_trait]
 impl Chip for QemuVirt {
-    fn board_init() {}
+    fn board_init() {
+        // 内嵌 rt-async 专属 DTB（子模块自包含模式）。
+        // 路径：src -> qemu-virt -> chips -> platform -> modules -> rt-async 根（5 级 ../）。
+        static RT_ASYNC_DTB: &[u8] = include_bytes!("../../../../../its/rt-async-qemu-virt.dtb");
+        platform::dtb::init_dtb(RT_ASYNC_DTB);
+    }
 
     fn shutdown() -> ! {
         unsafe {
