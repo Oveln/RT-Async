@@ -50,14 +50,10 @@ impl ClintTimer {
 
 impl Timer for ClintTimer {
     fn freq_hz(&self) -> u32 {
-        // 0（未 probe）回退 10 MHz，避免上层在 probe 前读取得到 0（用于 deadline
-        // 计算会立刻触发或除零）。probe 完成后为真实 timebase-frequency。
-        let f = FREQ.load(Ordering::Acquire);
-        if f == 0 {
-            10_000_000
-        } else {
-            f as u32
-        }
+        // probe 完成后为真实 timebase-frequency（从 DT /cpus/timebase-frequency 读）。
+        // probe 前返回 0——此路径不可达：freq_hz 仅在任务里被 after() 调用，
+        // 而任务 poll 晚于 board_init（probe 在其中完成）。
+        FREQ.load(Ordering::Acquire) as u32
     }
 
     fn now(&self) -> u64 {

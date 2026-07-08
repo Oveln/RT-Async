@@ -111,24 +111,12 @@ pub fn set_reset(dev: &'static dyn Reset) {
     RESET.set(dev);
 }
 
-/// 取默认 console。
-///
-/// 若未注册（boot 未跑完或 Serial driver probe 失败），返回一个静默丢弃的
-/// fallback（no-op）。这样 panic handler 等早期路径在 console 缺失时不会因
-/// 二次 panic 把日志通路打死。上层正常使用时 console 已 probe，fallback 不触发。
+/// 取默认 console。若未注册则 panic（与 timer/ipi/reset 一致）。
 pub fn console() -> &'static dyn Serial {
-    match CONSOLE.get() {
-        Some(c) => *c,
-        None => &NOOP_SERIAL,
-    }
+    *CONSOLE
+        .get()
+        .expect("console: no Serial device registered")
 }
-
-/// Fallback console：未 probe 时静默丢弃，避免 panic → put_str → console() 二次 panic。
-struct NoOpSerial;
-impl Serial for NoOpSerial {
-    fn write(&self, _buf: &[u8]) {}
-}
-static NOOP_SERIAL: NoOpSerial = NoOpSerial;
 
 /// 取默认 timer。若未注册则 panic（timer 不可缺，无静默降级语义）。
 pub fn timer() -> &'static dyn Timer {

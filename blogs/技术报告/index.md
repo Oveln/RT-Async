@@ -4,6 +4,7 @@
 
 ## 文章列表
 
+- [rt-async 驱动架构现代化：设备树 handoff + Driver Model](./2026-07-08-driver-model与DTB-handoff现代化.md) (2026-07-08)
 - [一次 AMP 死锁排查：spin::Mutex 不关中断与 ring buffer 直读](./2026-06-03-AMP死锁排查.md) (2026-06-03)
 - [技术报告 2026-04](./2026-04-30-技术报告-2026-04.md) (2026-04-30)
 - [embassy_preempt 性能测试报告](./2026-04-07-embassy_preempt性能测试报告.md) (2026-04-07)

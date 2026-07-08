@@ -27,11 +27,9 @@ static BASE: AtomicUsize = AtomicUsize::new(0);
 
 impl Serial for Ns16550a {
     fn write(&self, buf: &[u8]) {
+        // BASE 由 probe 在 set_console 前写入，故 INSTANCE 注册进 registry 后
+        // BASE 必非零；write 只经 registry 调用，无需判空。
         let base = BASE.load(Ordering::Acquire) as *mut u8;
-        if base.is_null() {
-            // console 在 probe 完成前不应被调用；静默丢弃避免 panic 把日志通路打死。
-            return;
-        }
         for &byte in buf {
             // SAFETY: 写 THR 寄存器（基址偏移 0）。QEMU 即写即收。
             unsafe { core::ptr::write_volatile(base, byte) };
