@@ -264,6 +264,7 @@ dependencies = [
  "fdt-parser",
  "log",
  "portable-atomic",
+ "riscv",
  "riscv64-rt",
 ]
 

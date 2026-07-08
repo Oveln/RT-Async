@@ -6,12 +6,10 @@ edition = "2024"
 [dependencies]
 extern-trait = "0.4.3"
 riscv64-rt = { path = "archs/riscv64-rt", optional = true }
+riscv = { version = "0.16.0", optional = true, default-features = false, features = ["critical-section-single-hart"] }
 log = { version = "0.4", default-features = false }
 portable-atomic = { version = "1", default-features = false }
 fdt-parser = "0.4.19"
 
 [features]
-# clear_bss 由 riscv64-rt 在 __start 早期清零 BSS（__sbss..__ebss）。
-# rt-async 经 QEMU loader 加载，BSS 是 NOLOAD（不初始化），driver model 的
-# 全局 static（STATE / FDT / Slot 等）依赖 BSS 为 0，故必须运行时清零。
-riscv64 = ["dep:riscv64-rt", "riscv64-rt/clear_bss"]
+riscv64 = ["dep:riscv64-rt", "dep:riscv", "riscv64-rt/clear_bss"]

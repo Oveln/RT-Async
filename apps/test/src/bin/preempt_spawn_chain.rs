@@ -12,7 +12,6 @@ use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::Chip;
 #[executor::task]
 async fn task_mid() {
     unsafe {
@@ -39,7 +38,7 @@ async fn task_low(spawner: Pin<&'static Spawner<4>>) {
     }
 
     test::assert_log(&["low_start", "high", "mid", "low_end"]);
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }
 
 #[executor::main]

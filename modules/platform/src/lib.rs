@@ -1,25 +1,19 @@
 #![no_std]
 
 use extern_trait::extern_trait;
-#[extern_trait(pub ChipImpl)]
-pub trait Chip {
-    fn board_init();
-    fn shutdown() -> !;
-    fn put_str(s: &str);
-    unsafe fn pend();
-    unsafe fn clear_pend();
-}
 
-#[extern_trait(pub TimerChipImpl)]
-pub trait TimerChip {
-    fn freq_hz() -> u32;
-    fn now_ticks() -> u64;
-    fn set_deadline(tick: u64);
-    unsafe fn enable_timer_irq();
+/// 板级初始化钩子。
+///
+/// 每个板级 crate 实现该 trait（经 `#[extern_trait]` 做静态分发）。
+/// `init()` 在 `platform::init()` 内部调用，负责 DTB 注入、driver 列表注册
+/// 和 DT 遍历实例化 ([`crate::driver::boot`])。
+#[extern_trait(pub BoardImpl)]
+pub trait Board {
+    fn init();
 }
 
 #[cfg(feature = "riscv64")]
-pub use arch::{disable_interrupts, enable_interrupts, idle};
+pub use arch::{disable_interrupts, enable_interrupts, enable_mtimer, idle};
 #[cfg(feature = "riscv64")]
 pub use riscv64_rt as arch;
 
@@ -27,16 +21,17 @@ pub mod device;
 pub mod driver;
 pub mod drivers;
 pub mod dtb;
+pub mod irq;
 pub mod logger;
 pub use logger::Logger;
 
-// 便捷 re-export：上层（chip shim / executor / futures / apps）通过
-// `platform::{console, timer, ipi, reset, Driver, Serial, ...}` 直接取用，
-// 无需写全路径。
-pub use device::{Driver, Ipi, Reset, Serial, Timer};
+// 便捷 re-export：上层（executor / futures / apps）直接取用。
+pub use device::{Driver, InterruptController, Ipi, Reset, Serial, Timer};
 pub use driver::{
-    boot, console, ipi, reset, timer, set_console, set_drivers, set_ipi, set_reset, set_timer,
+    boot, console, intctl, ipi, reset, set_console, set_drivers, set_intctl, set_ipi, set_reset,
+    set_timer, timer,
 };
+pub use irq::{dispatch_external, register_irq, IrqHandler};
 
 static LOGGER: Logger = Logger::new();
 
@@ -46,13 +41,15 @@ pub fn init(max_level: log::LevelFilter) {
     #[cfg(feature = "riscv64")]
     arch::arch_init();
 
-    ChipImpl::board_init();
+    BoardImpl::init();
 }
 
 #[cfg(feature = "riscv64")]
 pub unsafe fn start() {
     unsafe {
-        TimerChipImpl::enable_timer_irq();
+        // 先把 deadline 推到最远，避免立即触发定时器中断。
+        driver::timer().set_deadline(u64::MAX);
+        arch::enable_mtimer();
         arch::enable_msi();
         arch::enable_mei();
         arch::enable_interrupts();
@@ -63,11 +60,13 @@ pub static PEND_MARKER: portable_atomic::AtomicBool = portable_atomic::AtomicBoo
 
 pub unsafe fn pend() {
     PEND_MARKER.store(true, portable_atomic::Ordering::Release);
-    unsafe { ChipImpl::pend() };
+    // SAFETY: 调用者（executor wake path）保证上下文合适。
+    unsafe { driver::ipi().send() };
 }
 
 pub unsafe fn clear_pend() -> bool {
     let is_system = PEND_MARKER.swap(false, portable_atomic::Ordering::AcqRel);
-    unsafe { ChipImpl::clear_pend() };
+    // SAFETY: ISR 早期调用，关中断上下文。
+    unsafe { driver::ipi().clear() };
     is_system
 }

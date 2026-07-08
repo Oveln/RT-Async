@@ -54,6 +54,35 @@ pub trait Driver: Send + Sync {
 pub trait Serial: Send + Sync {
     /// 阻塞写出一串字节。
     fn write(&self, buf: &[u8]);
+    /// 从接收 FIFO 读一个字节。若无数据则返回 `None`。
+    fn read(&self) -> Option<u8> {
+        None
+    }
+    /// 接收 FIFO 中是否有数据。
+    fn has_data(&self) -> bool {
+        self.read().is_some()
+    }
+}
+
+/// 中断控制器（Platform-Level Interrupt Controller / 核内中断路由）。
+///
+/// 外设通过 PLIC 等中断控制器汇总到 hart 的 Machine External 中断线。
+/// 该 trait 封装 claim / complete / enable 等操作，供中断分发层
+/// ([`crate::irq::dispatch_external`]) 和各驱动使用。
+pub trait InterruptController: Send + Sync {
+    /// 在中断控制器中使能指定外设中断源。
+    fn enable_irq(&self, irq: u32);
+    /// 禁能指定外设中断源。
+    fn disable_irq(&self, irq: u32);
+    /// 设置中断源优先级（0 = 禁能，通常 1–7）。
+    fn set_priority(&self, irq: u32, prio: u32);
+    /// 设置中断控制器优先级阈值。
+    fn set_threshold(&self, thr: u32);
+    /// 认领当前触发的中断源 ID（读 PLIC claim 寄存器）。
+    /// 返回 0 表示虚假中断。
+    fn claim(&self) -> u32;
+    /// 标记中断处理完成（写 PLIC claim/complete 寄存器）。
+    fn complete(&self, irq: u32);
 }
 
 /// 硬件定时器（单调时钟 + 单次截止时间）。

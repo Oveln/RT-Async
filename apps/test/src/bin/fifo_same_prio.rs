@@ -11,7 +11,6 @@ use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::Chip;
 #[executor::task]
 async fn task_a() {
     unsafe {
@@ -45,5 +44,5 @@ fn main(spawner: Pin<&'static Spawner<4>>) {
     }
 
     test::assert_log(&["a", "b", "c"]);
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }

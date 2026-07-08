@@ -27,7 +27,6 @@ use core::{
 use executor::priority::Priority;
 use executor::spawner::Spawner;
 use executor::task::storage::TaskStorage;
-use platform::Chip;
 
 // --- Worker futures ---
 
@@ -138,7 +137,7 @@ async fn test_join(spawner: Pin<&'static Spawner<4>>) {
     if R4.load(Ordering::Acquire) != 20 {
         test::fail("r4 != 20");
     }
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }
 
 #[executor::main]

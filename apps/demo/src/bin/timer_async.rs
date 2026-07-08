@@ -11,7 +11,6 @@ extern crate qemu_virt;
 
 use executor::priority::Priority;
 use fugit::ExtU64;
-use platform::Chip;
 
 #[executor::task]
 async fn tick_task() {
@@ -20,7 +19,7 @@ async fn tick_task() {
         log::info!("tick #{i}");
     }
     log::info!("timer_async demo done");
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }
 
 #[executor::interrupt]

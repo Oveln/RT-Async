@@ -1,26 +1,20 @@
 use core::fmt::Write;
 use log::{LevelFilter, Log, Metadata, Record, SetLoggerError};
 
-use crate::{Chip, ChipImpl};
+struct ConsoleWriter;
 
-struct ChipWriter(core::marker::PhantomData<fn() -> ChipImpl>);
-
-impl Write for ChipWriter {
+impl Write for ConsoleWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        ChipImpl::put_str(s);
+        crate::driver::console().write(s.as_bytes());
         Ok(())
     }
 }
 
-pub struct Logger {
-    _marker: core::marker::PhantomData<fn() -> ChipImpl>,
-}
+pub struct Logger;
 
 impl Logger {
     pub const fn new() -> Self {
-        Self {
-            _marker: core::marker::PhantomData,
-        }
+        Self
     }
 
     pub fn init(&'static self, max_level: LevelFilter) -> Result<(), SetLoggerError> {
@@ -39,7 +33,7 @@ impl Log for Logger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let mut w = ChipWriter(core::marker::PhantomData);
+        let mut w = ConsoleWriter;
         let _ = writeln!(w, "[{}] {}", record.level(), record.args());
     }
 

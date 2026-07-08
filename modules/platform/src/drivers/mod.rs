@@ -9,11 +9,15 @@
 //! [`default_drivers`] 的 `DEFAULT` 数组即可。
 
 pub mod ipi_clint_msip;
+#[cfg(feature = "riscv64")]
+pub mod plic_sifive;
 pub mod reset_sifive_test;
 pub mod serial_ns16550a;
 pub mod timer_clint;
 
 pub use ipi_clint_msip::ClintMsip;
+#[cfg(feature = "riscv64")]
+pub use plic_sifive::Plic;
 pub use reset_sifive_test::SifiveTest;
 pub use serial_ns16550a::Ns16550a;
 pub use timer_clint::ClintTimer;
@@ -25,7 +29,14 @@ pub use timer_clint::ClintTimer;
 ///
 /// [`crate::driver::set_drivers`]: crate::driver::set_drivers
 pub fn default_drivers() -> &'static [&'static dyn crate::Driver] {
-    &DEFAULT
+    #[cfg(feature = "riscv64")]
+    {
+        &DEFAULT_RISCV64
+    }
+    #[cfg(not(feature = "riscv64"))]
+    {
+        &DEFAULT
+    }
 }
 
 /// 内置 driver 单例列表。`static` 保证 `'static` 生命周期。
@@ -34,4 +45,13 @@ static DEFAULT: &[&dyn crate::Driver] = &[
     &timer_clint::INSTANCE,
     &ipi_clint_msip::INSTANCE,
     &reset_sifive_test::INSTANCE,
+];
+
+#[cfg(feature = "riscv64")]
+static DEFAULT_RISCV64: &[&dyn crate::Driver] = &[
+    &serial_ns16550a::INSTANCE,
+    &timer_clint::INSTANCE,
+    &ipi_clint_msip::INSTANCE,
+    &reset_sifive_test::INSTANCE,
+    &plic_sifive::PLIC,
 ];

@@ -45,7 +45,8 @@ PROVIDE(__Inner_MachineSoft = DefaultHandler);
 PROVIDE(SupervisorTimer = DefaultHandler);
 PROVIDE(MachineTimer = DefaultHandler);
 PROVIDE(SupervisorExternal = DefaultHandler);
-PROVIDE(MachineExternal = DefaultHandler);
+EXTERN(__rt_machine_external);
+PROVIDE(MachineExternal = __rt_machine_external);
 
 PROVIDE(_stext = ORIGIN(RAM));
 PROVIDE(_stack_start = ORIGIN(RAM) + LENGTH(RAM));

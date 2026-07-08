@@ -1,9 +1,8 @@
 //! Driver registry —— driver model 的中枢。
 //!
-//! 全局槽位持有已实例化的功能设备（console/timer/ipi/reset），由各 driver
-//! 的 [`Driver::probe`] 在板级初始化时填充。上层（兼容 shim [`ChipImpl`]/
-//! [`TimerChipImpl`]、executor、futures）通过便捷访问器
-//! [`console`] / [`timer`] / [`ipi`] / [`reset`] 取用。
+//! 全局槽位持有已实例化的功能设备（console/timer/ipi/reset/intctl），由各 driver
+//! 的 [`Driver::probe`] 在板级初始化时填充。上层（executor、futures）通过便捷访问器
+//! [`console`] / [`timer`] / [`ipi`] / [`reset`] / [`intctl`] 取用。
 //!
 //! [`boot`] 遍历设备树，对每个节点按 `compatible` 匹配板级提供的
 //! [`DRIVERS`] 列表，命中后调 [`Driver::probe`]。
@@ -16,9 +15,6 @@
 //! 结果对后续读者可见。单 hart 串行 probe 场景下安全；多 hart 需保证仅一个
 //! hart 调用 `set`。板级 driver 列表（`&'static [&'static dyn Driver]`）同理，
 //! 由板级 glue 经 [`set_drivers`] 注入（避免 platform 反向依赖 driver crate）。
-//!
-//! [`ChipImpl`]: crate::ChipImpl
-//! [`TimerChipImpl`]: crate::TimerChipImpl
 
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
@@ -26,7 +22,7 @@ use core::mem::MaybeUninit;
 use fdt_parser::Fdt;
 use portable_atomic::{AtomicU8, Ordering};
 
-use crate::device::{Driver, Ipi, Reset, Serial, Timer};
+use crate::device::{Driver, InterruptController, Ipi, Reset, Serial, Timer};
 
 /// 未初始化。
 const STATE_UNINIT: u8 = 0;
@@ -88,6 +84,8 @@ static TIMER: Slot<&'static dyn Timer> = Slot::new();
 static IPI: Slot<&'static dyn Ipi> = Slot::new();
 /// 复位/关机设备。
 static RESET: Slot<&'static dyn Reset> = Slot::new();
+/// 中断控制器（PLIC 等）。
+static INTC: Slot<&'static dyn InterruptController> = Slot::new();
 /// 板级提供的 driver 列表（`&'static [&'static dyn Driver]` 是胖指针）。
 static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
 
@@ -131,6 +129,18 @@ pub fn ipi() -> &'static dyn Ipi {
 /// 取 reset 设备。若未注册则 panic。
 pub fn reset() -> &'static dyn Reset {
     *RESET.get().expect("reset: no Reset device registered")
+}
+
+/// 注册中断控制器。由 InterruptController driver 的 probe 调用。
+pub fn set_intctl(dev: &'static dyn InterruptController) {
+    INTC.set(dev);
+}
+
+/// 取中断控制器。若未注册则 panic。
+pub fn intctl() -> &'static dyn InterruptController {
+    *INTC
+        .get()
+        .expect("intctl: no InterruptController device registered")
 }
 
 /// 设置板级 driver 列表。由板级 glue 在 `board_init` 早期调用，`boot()` 之前。
