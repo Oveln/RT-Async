@@ -68,33 +68,32 @@ rt-async 实际有三条运行环境，DTB 来源各不同：
 ## 架构分层
 
 ```
-应用层 (apps/ — 零改动)
+应用层 (apps/)
   │  platform::init(log_level)   ← 签名不变
   │  #[executor::main] / #[executor::interrupt]  ← 宏 codegen 不变
-  │  futures::timer::after().await  ← async API 不变
+  │  futures::timer::after().await / SerialRx::new().await  ← async API
   ▼
-platform::init() → ChipImpl::board_init()
+platform::init() → BoardImpl::init()          ← extern_trait 极简板级钩子
   │
-  ├── ① init_dtb(slice)         ← DTB 注入（来源由板级决定）
-  ├── ② set_drivers(&[&dyn Driver])  ← 注册板级 driver 列表
-  └── ③ boot()                  ← 遍历 DT，按 compatible 匹配 → probe
+  ├── ① init_dtb(slice)                      ← DTB 注入（来源由板级决定）
+  ├── ② set_drivers(&[&dyn Driver])          ← 注册板级 driver 列表
+  ├── ③ boot()                               ← 遍历 DT，按 compatible 匹配 → probe
+  └── ④ register_irq(...) + intctl().enable_irq(...)  ← 板级 IRQ 绑定
         │
         ▼
 driver registry (全局 Slot<T> 槽位)
-  ├─ CONSOLE: &dyn Serial   ← NS16550A probe 后填充
-  ├─ TIMER:  &dyn Timer     ← ClintTimer probe 后填充
-  ├─ IPI:    &dyn Ipi       ← ClintMsip probe 后填充
-  └─ RESET:  &dyn Reset     ← SifiveTest probe 后填充
+  ├─ CONSOLE: &dyn Serial                ← NS16550A probe 后填充
+  ├─ TIMER:   &dyn Timer                 ← ClintTimer probe 后填充
+  ├─ IPI:     &dyn Ipi                   ← ClintMsip probe 后填充
+  ├─ RESET:   &dyn Reset                 ← SifiveTest probe 后填充
+  └─ INTC:    &dyn InterruptController   ← PLIC probe 后填充（新增）
         │
-        ▼ (上层访问器)
-ChipImpl/TimerChipImpl (extern_trait shim — 纯转发)
-  ├─ put_str(s)     → console().write(s)
-  ├─ set_deadline(t) → timer().set_deadline(t)
-  ├─ pend()         → ipi().send()
-  └─ ...
+        ▼ (上层直接调用 driver 访问器，不再经过 ChipImpl/TimerChipImpl 转发)
+  platform::console().write() / platform::timer().set_deadline() / platform::reset().shutdown()
+  platform::intctl().claim() / platform::dispatch_external()
 ```
 
-调用顺序天然正确：`init()` → `board_init()` → `init_dtb()` → `set_drivers()` → `boot()`（probe 各 driver）→ registry 就绪 → 上层使用。
+调用顺序天然正确：`init()` → `BoardImpl::init()` → `init_dtb()` → `set_drivers()` → `boot()`（probe 各 driver）→ `register_irq` → registry + IRQ 就绪 → 上层使用。
 
 ## 核心组件
 
@@ -670,9 +669,7 @@ __rust_main (executor-macro 生成)
           │      ├─ probe MSIP      → set_ipi(&INSTANCE)
           │      └─ probe SiFive    → set_reset(&INSTANCE)
           │    register_irq(UART1IRQ, ns16550a::rx_handler)
-          │    intctl().enable_irq(UART1IRQ)
-          │    intctl().set_priority(UART1IRQ, 2)
-          │
+          │    （PLIC enable/priority 推迟到 main()，见下文「AMP 共享 PLIC 竞争」）
           │  [std-chip (host 单测)]
           │    set_console(&STD_SERIAL)   ← print!
           │    set_timer(&STD_TIMER)      ← stub
@@ -681,15 +678,98 @@ __rust_main (executor-macro 生成)
           │
           └── 返回 platform::init，driver registry 全部就绪
 
-  → 用户 async fn main()  ← spawner.run 执行应用代码
+  → 用户 async fn main()  ← spawner.run 执行应用代码（仅 spawn 任务，不感知 IRQ 配置）
   → platform::start()     ← 应用代码返回后
+      BoardImpl::late_init()          ← 板级延迟配置（chip-qemu-virt-rt 在此配 UART1 PLIC，见下文）
       timer().set_deadline(u64::MAX)  ← 推远定时器截止
       arch::enable_mtimer()           ← 开 MachineTimer 中断
+      arch::enable_mei()              ← 开 MachineExternal 中断（必须在 MSIE 之前，见下文）
       arch::enable_msi()              ← 开 MachineSoft 中断
-      arch::enable_mei()              ← 开 MachineExternal 中断
       arch::enable_interrupts()       ← 开全局中断 (mstatus.MIE)
   → loop { arch::idle() }  ← WFI 等待中断，调度器接管
 ```
+
+---
+
+## 排错实录：外部中断为何不触发（两个根因）
+
+重构完成后，`console_interrupt` 的轮询模式工作正常，但纯中断驱动模式（`SerialRx::new().await`）完全无响应。诊断任务读取寄存器状态，定位到**两个独立的根因**。
+
+### 根因一：`start()` 中断使能顺序导致 `mie.MEIE` 永不置位
+
+**现象**：诊断读到 `mie=0x88`（MTIE=1, MSIE=1, **MEIE=0**），但 `start()` 明明调了 `enable_mei()`。
+
+**根因**：`platform::start()` 被调用的那一刻，`mip.MSIP` 通常已经是 1——hart0（StarryOS）在启动早期就通过 IPI 唤醒 hart1。原始使能顺序是：
+
+```rust
+enable_mtimer();   // mie.MTIE = 1
+enable_msi();      // mie.MSIE = 1  ← MSIP 已 pending，MSIE 一置位，MSI 立即抢占
+enable_mei();      // ← 永远执行不到！
+enable_interrupts();
+```
+
+`enable_msi()` 置位 MSIE 的瞬间，MSI 立即触发，跳进 `MachineSoft` ISR。而 `#[executor::main]` 宏生成的 `MachineSoft` **在 ISR 内部直接跑抢占式调度器**（`spawner.run(rt)`），此后控制流再也不会回到 `start()` 末尾——`enable_mei()` 和 `enable_interrupts()` 被永久旁路。
+
+MTIE/MSIE 之所以生效，是因为它们写在抢占点之前；`mstatus.MIE=1` 是因为调度器内部又调了 `enable_interrupts()`。唯独 MEIE 没人写过。
+
+**修复**：`enable_mei()` 提前到 `enable_msi()` 之前：
+
+```rust
+arch::enable_mtimer();
+arch::enable_mei();    // ← 先开 MEIE
+arch::enable_msi();    // ← 再开 MSIE（即使立即被 MSI 抢占，MEIE 也已就位）
+arch::enable_interrupts();
+```
+
+**验证手段**：用 subagent 做了 GDB 单步（`scheduler-locking on` 只跑 hart1）+ 最小复现实例（`/tmp/mie-repro/`，仅依赖 riscv crate），证明 riscv crate 的 `set_mext` 生成的指令和寄存器值完全正确——**这不是编译器/crate bug，是控制流 bug**。`enable_mei` 那条 `csrrs mie, s0(=0x800)` 的断点从未命中。
+
+### 根因二：AMP 共享 PLIC，hart0 覆盖 source 12 priority
+
+修好 MEIE 后（`mie=0x888`），中断仍不触发：诊断读到 PLIC source 12 `prio=0`（priority=0 即禁能）。现场手动重设 `prio=2` 后**立即触发** DISPATCH、命令完整执行。
+
+**根因**：QEMU virt 的 PLIC 是两 hart 共享的，**priority 寄存器是全局的**（每个 source 一份，不按 context 分）。hart0（StarryOS）的 PLIC 初始化会调用 `disable_all_sources(ndev)`（`tgoskits/drivers/intc/riscv_plic/src/lib.rs:108`），把所有 source 的 priority 批量清 0——包括 rt-async 用的 source 12（UART1）。
+
+而 rt-async 的启动**远早于** StarryOS：hart1 在 OpenSBI 释放后立即跑 `__rust_main`，hart0 要等 StarryOS 整个启动序列（~1.5 秒）才到 PLIC 初始化。所以无论在 `Board::init()` 还是 `main()` 里配 `set_priority(12, 2)`，都会被稍后运行的 StarryOS 覆盖成 0。
+
+**修复**：`chip-qemu-virt-rt` 在 `Board::late_init()`（新增的板级 hook，由 `platform::start()` 在开中断前调用）里配置 UART1 PLIC：基于 CLINT `mtime` 忙等 ~3 秒（hart0 启动窗口），再 `enable_irq` + `set_priority` 并裸读 PLIC priority 寄存器确认（重试有上限，超时告警不死循环）。
+
+```rust
+// Board trait 新增默认空 hook，无此需求的板子零负担
+#[extern_trait(pub BoardImpl)]
+pub trait Board {
+    fn init();
+    fn late_init() {}  // 在 main() 之后、start() 开中断之前
+}
+
+// chip-qemu-virt-rt
+impl Board for QemuVirtRt {
+    fn init() { /* DTB + driver boot + register_irq(handler) */ }
+    fn late_init() { setup_console_irq(); }
+}
+
+fn setup_console_irq() {
+    // 等 hart0 启动窗口（含 PLIC disable_all_sources）
+    let wait = freq.saturating_mul(3);
+    while timer.now() - start < wait { spin_loop(); }
+    intctl().enable_irq(UART1IRQ);
+    for _ in 0..20 {  // 重试有上限
+        intctl().set_priority(UART1IRQ, 2);
+        if read_prio(PLICBASE + 4*UART1IRQ) == 2 { return; }
+        spin();
+    }
+    log::warn!("priority not stable, forcing");
+}
+```
+
+设计要点：
+- **`late_init()` 是通用 hook，默认空实现**，子模块 qemu-virt / std-chip / 未来 K3 都无需实现，app 的 `main()` 完全不感知 IRQ 配置（换板零改动）。
+- **priority 读回用裸 MMIO（`amp::PLICBASE`）**，不污染通用 `InterruptController` trait——这是 QEMU AMP 共享 PLIC 的板级自查，不是中断控制器的通用契约。
+
+### 启示
+
+- **AMP 共享外设的配置顺序是核心难点**：两个 hart 不能同时写同一个全局寄存器。priority 是全局的，enable/threshold/claim 才是 per-context 的。
+- **「中断使能顺序」在裸机里是真实陷阱**：pending 的中断一旦使能就会立即抢占，打乱后续初始化序列。开 MSIE 前必须确认 MSIP 不会立即抢占，或把更重要的使能（MEIE）提前。
+- **诊断要靠实测，不要靠反汇编推断**：本文一度误判为「编译器复用 s0 寄存器导致 MEIE 未置位」，GDB 单步证明该推断完全错误。
 
 ---
 

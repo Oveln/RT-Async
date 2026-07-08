@@ -10,6 +10,12 @@ use extern_trait::extern_trait;
 #[extern_trait(pub BoardImpl)]
 pub trait Board {
     fn init();
+    /// 板级延迟初始化：在 app `main()` 之后、`platform::start()` 开中断之前调用。
+    ///
+    /// 用于需要推迟到全局中断开启前最后时刻的板级配置。典型场景：AMP 共享
+    /// 中断控制器，需等待另一 hart 完成初始化后再配置本 hart 的中断源。
+    /// 默认空实现，无此需求的板子无需实现。
+    fn late_init() {}
 }
 
 #[cfg(feature = "riscv64")]
@@ -47,11 +53,19 @@ pub fn init(max_level: log::LevelFilter) {
 #[cfg(feature = "riscv64")]
 pub unsafe fn start() {
     unsafe {
+        // 板级延迟初始化：在开中断前给板子最后一次配置机会（如 AMP 共享
+        // 中断控制器需等待另一 hart 完成初始化）。默认空实现。
+        BoardImpl::late_init();
+
         // 先把 deadline 推到最远，避免立即触发定时器中断。
         driver::timer().set_deadline(u64::MAX);
         arch::enable_mtimer();
-        arch::enable_msi();
+        // MEIE 必须在 MSIE 之前：start() 被调用时 mip.MSIP 常已 pending
+        // （hart0 的 IPI），若先开 MSIE 会立即被 MSI 抢占进 MachineSoft ISR
+        // （该 ISR 内部直接跑抢占式调度器），旁路后续 enable_mei/
+        // enable_interrupts，导致 MEIE=0、外部中断永不触发。
         arch::enable_mei();
+        arch::enable_msi();
         arch::enable_interrupts();
     }
 }

@@ -37,7 +37,8 @@ const FCR_CLR_RX: u8 = 1 << 1; // 清 RX FIFO
 const FCR_CLR_TX: u8 = 1 << 2; // 清 TX FIFO
 
 // LSR 位
-const LSR_DR: u8 = 1 << 0; // 数据就绪
+const LSR_DR: u8 = 1 << 0;   // 数据就绪
+const LSR_THRE: u8 = 1 << 5; // 发送保持寄存器空
 
 // ── 驱动实例 ─────────────────────────────────────────────────────────
 
@@ -56,8 +57,13 @@ impl Serial for Ns16550a {
     fn write(&self, buf: &[u8]) {
         let base = BASE.load(Ordering::Acquire) as *mut u8;
         for &byte in buf {
-            // SAFETY: 写 THR 寄存器（基址偏移 0）。QEMU 即写即收。
-            unsafe { core::ptr::write_volatile(base, byte) };
+            // 等发送保持寄存器空（LSR.THRE = 1），防止连续写入时 FIFO 溢出丢字节。
+            unsafe {
+                while core::ptr::read_volatile(base.add(LSR)) & LSR_THRE == 0 {
+                    core::hint::spin_loop();
+                }
+                core::ptr::write_volatile(base, byte);
+            }
         }
     }
 
@@ -149,7 +155,6 @@ unsafe impl Sync for Ns16550a {}
 // ── 公开 RX API ──────────────────────────────────────────────────────
 
 /// ISR 压入字节。环形缓冲区满则静默丢弃。
-#[allow(dead_code)]
 fn rx_push(byte: u8) {
     let head = RX.head.load(Ordering::Acquire);
     let next = (head.wrapping_add(1)) & RX_BUF_MASK;
@@ -166,7 +171,6 @@ fn rx_push(byte: u8) {
 }
 
 /// Task 从环形缓冲区取字节。
-#[allow(dead_code)]
 fn rx_pop() -> Option<u8> {
     let tail = RX.tail.load(Ordering::Acquire);
     let head = RX.head.load(Ordering::Acquire);
@@ -182,7 +186,6 @@ fn rx_pop() -> Option<u8> {
 }
 
 /// ISR 在 RX 完成时调用的唤醒通知。原子消费已注册的 Waker。
-#[allow(dead_code)]
 fn rx_wake() {
     if RX.has_waker.swap(false, Ordering::AcqRel) {
         // SAFETY: consume 已注册的 Waker。has_waker==true 确保 Waker 槽有效。

@@ -2,10 +2,10 @@
 //!
 //! # Usage
 //!
-//! Requires that the board has registered the UART RX IRQ handler:
+//! Requires that the board has registered the UART RX IRQ handler (done in
+//! `Board::init`/`Board::late_init`):
 //! ```ignore
-//! platform::register_irq(UART1IRQ, platform::drivers::serial_ns16550a::rx_handler);
-//! platform::intctl().enable_irq(UART1IRQ);
+//! let byte = futures::serial::SerialRx::new().await;
 //! ```
 //!
 //! ```ignore

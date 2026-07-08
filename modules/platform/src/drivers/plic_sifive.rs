@@ -112,6 +112,8 @@ impl Driver for Plic {
         let ctx = hart_id * 2;
         CONTEXT.store(ctx, Ordering::Release);
 
+        log::info!("PLIC probed: base={:#x}, mhartid={}, context={}", reg.address, hart_id, ctx);
+
         // PLIC 门槛清零（不屏蔽任何中断）。
         let thr_addr =
             (reg.address as usize + THRESHOLD_OFFSET + ctx * 0x1000) as *mut u32;
