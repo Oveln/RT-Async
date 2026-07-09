@@ -38,7 +38,7 @@ static IRQ_TABLE: [AtomicUsize; MAX_IRQ] =
 
 /// 为一个外设 IRQ 注册 handler。
 ///
-/// 在 `board_init` 中调用（`set_drivers` + `boot` 之后，`platform::start`
+/// 在 `board_init` 中调用（`DRIVERS.set` + `boot` 之后，`platform::start`
 /// 开全局中断之前）。重复注册会静默覆盖旧的 handler。
 pub fn register_irq(irq: u32, handler: IrqHandler) {
     debug_assert!((irq as usize) < MAX_IRQ, "IRQ {} exceeds MAX_IRQ", irq);

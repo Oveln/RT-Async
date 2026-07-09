@@ -7,14 +7,14 @@
 //! - **轮询**：`Serial::read() / has_data()` 直接读 RBR。
 //! - **中断驱动**：probe 使能 FIFO 和 ERBFI（RX 中断），通过板级注册
 //!   [`rx_handler`] 到 `platform::register_irq`，字节流入内建环形缓冲区。
-//!   [`rx_poll`] 遵循 disable→register→recheck→enable 临界区模式
+//!   `Serial::rx_register_waker` 遵循 disable→register→recheck→enable 临界区模式
 //!   （与 `apps/rt-async-app/src/uart_wait.rs` 一致），可被
-//!   `SerialRx` Future 调用。
+//!   `SerialRx` Future 经 registry 调用。
 
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
-use core::task::{Context, Poll, Waker};
+use core::task::Waker;
 
 use fdt_parser::Node;
 
@@ -83,6 +83,50 @@ impl Serial for Ns16550a {
         let base = BASE.load(Ordering::Acquire) as *mut u8;
         unsafe { core::ptr::read_volatile(base.add(LSR)) & LSR_DR != 0 }
     }
+
+    /// 中断驱动 RX 的 poll 原语（override）。
+    ///
+    /// 遵循经典的 ISR/task 竞争修复模式：
+    /// 1. 快速路径：环形缓冲区非空 → 立即返回字节
+    /// 2. 关中断，注册 waker
+    /// 3. **重检**环形缓冲区——若在注册 waker 的间隙 ISR 推入了字节，
+    ///    则立即取出并拆回 waker
+    /// 4. 开中断，返回 Pending
+    ///
+    /// 仅 riscv64 可用：依赖 `crate::arch` 关/开中断原语。host 桩经 trait
+    /// 默认实现静默降级为 `Unsupported`。
+    #[cfg(feature = "riscv64")]
+    fn rx_register_waker(&self, cx: &mut core::task::Context<'_>) -> crate::device::SerialRxStatus {
+        use crate::device::SerialRxStatus;
+        // 快速路径。
+        if let Some(byte) = rx_pop() {
+            return SerialRxStatus::Ready(byte);
+        }
+
+        // 关中断后注册 waker。
+        unsafe { crate::arch::disable_interrupts() };
+        // SAFETY: 关中断临界区。
+        unsafe {
+            if RX.has_waker.load(Ordering::Relaxed) {
+                (*RX.waker.get()).assume_init_drop();
+            }
+            (*RX.waker.get()).write(cx.waker().clone());
+        }
+        RX.has_waker.store(true, Ordering::Release);
+
+        // 重检——ISR 可能在注册 waker 前已推入字节。
+        if let Some(byte) = rx_pop() {
+            RX.has_waker.store(false, Ordering::Relaxed);
+            unsafe {
+                (*RX.waker.get()).assume_init_drop();
+            }
+            unsafe { crate::arch::enable_interrupts() };
+            return SerialRxStatus::Ready(byte);
+        }
+
+        unsafe { crate::arch::enable_interrupts() };
+        SerialRxStatus::Pending
+    }
 }
 
 // ── Driver trait impl ────────────────────────────────────────────────
@@ -114,7 +158,9 @@ impl Driver for Ns16550a {
         RX.head.store(0, Ordering::Release);
         RX.tail.store(0, Ordering::Release);
 
-        crate::driver::set_console(&INSTANCE);
+        // 登记进多实例注册表；默认 console 由 boot() 的 try_derive_console
+        // 据 chosen.stdout-path 选定（不再由 probe 自命）。
+        crate::driver::SERIALS.register(&INSTANCE);
     }
 }
 
@@ -205,50 +251,4 @@ pub fn rx_handler(_irq: u32) {
         rx_push(byte);
     }
     rx_wake();
-}
-
-/// `SerialRx` Future 的 poll 原语。
-///
-/// 遵循经典的 ISR/task 竞争修复模式：
-/// 1. 快速路径：环形缓冲区非空 → 立即返回字节
-/// 2. 关中断，注册 waker
-/// 3. **重检**环形缓冲区——若在注册 waker 的间隙 ISR 推入了字节，
-///    则立即取出并拆回 waker
-/// 4. 开中断，返回 Pending
-#[cfg(feature = "riscv64")]
-pub fn rx_poll(cx: &mut Context<'_>) -> Poll<u8> {
-    // 快速路径。
-    if let Some(byte) = rx_pop() {
-        return Poll::Ready(byte);
-    }
-
-    // 关中断后注册 waker。
-    unsafe { crate::arch::disable_interrupts() };
-    // SAFETY: 关中断临界区。
-    unsafe {
-        if RX.has_waker.load(Ordering::Relaxed) {
-            (*RX.waker.get()).assume_init_drop();
-        }
-        (*RX.waker.get()).write(cx.waker().clone());
-    }
-    RX.has_waker.store(true, Ordering::Release);
-
-    // 重检——ISR 可能在注册 waker 前已推入字节。
-    if let Some(byte) = rx_pop() {
-        RX.has_waker.store(false, Ordering::Relaxed);
-        unsafe {
-            (*RX.waker.get()).assume_init_drop();
-        }
-        unsafe { crate::arch::enable_interrupts() };
-        return Poll::Ready(byte);
-    }
-
-    unsafe { crate::arch::enable_interrupts() };
-    Poll::Pending
-}
-
-/// Non-riscv64 stub: serial RX not available on host.
-#[cfg(not(feature = "riscv64"))]
-pub fn rx_poll(_cx: &mut Context<'_>) -> Poll<u8> {
-    Poll::Pending
 }

@@ -1,4 +1,4 @@
-//! Async serial RX backed by the NS16550A driver's ring buffer.
+//! Async serial RX backed by the registry's console device.
 //!
 //! # Usage
 //!
@@ -16,11 +16,17 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use platform::SerialRxStatus;
+
 /// Future that completes when a byte is received from the serial port.
 ///
-/// Uses the NS16550A driver's built-in ring buffer and waker slot.
-/// If no RX IRQ is registered, this will never complete — use
-/// `platform::console().read()` for polling instead.
+/// Polls RX through the registry's console [`platform::Serial`] device via
+/// [`platform::Serial::rx_register_waker`]. Drivers that support interrupt
+/// driven RX (e.g. NS16550A) implement that method with the
+/// disable→register→recheck→enable critical-section pattern; drivers that do
+/// not (including host stubs) return [`SerialRxStatus::Unsupported`], in which
+/// case this Future never completes — use `platform::console().read()` for
+/// polling instead.
 pub struct SerialRx;
 
 impl SerialRx {
@@ -33,6 +39,9 @@ impl Future for SerialRx {
     type Output = u8;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<u8> {
-        platform::drivers::serial_ns16550a::rx_poll(cx)
+        match platform::driver::console().rx_register_waker(cx) {
+            SerialRxStatus::Ready(b) => Poll::Ready(b),
+            SerialRxStatus::Pending | SerialRxStatus::Unsupported => Poll::Pending,
+        }
     }
 }

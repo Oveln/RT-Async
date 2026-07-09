@@ -119,6 +119,6 @@ impl Driver for Plic {
             (reg.address as usize + THRESHOLD_OFFSET + ctx * 0x1000) as *mut u32;
         unsafe { core::ptr::write_volatile(thr_addr, 0) };
 
-        crate::driver::set_intctl(&PLIC);
+        crate::driver::INTC.set(&PLIC);
     }
 }

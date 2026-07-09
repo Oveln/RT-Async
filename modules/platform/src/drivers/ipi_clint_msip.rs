@@ -72,6 +72,6 @@ impl Driver for ClintMsip {
         OFF_MSIP.store(hart * MSIP_STRIDE, Ordering::Release);
         READY.store(1, Ordering::Release);
 
-        crate::driver::set_ipi(&INSTANCE);
+        crate::driver::IPI.set(&INSTANCE);
     }
 }

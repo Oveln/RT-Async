@@ -5,7 +5,12 @@ struct ConsoleWriter;
 
 impl Write for ConsoleWriter {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        crate::driver::console().write(s.as_bytes());
+        // boot 早期（derive_console 之前）console 可能尚未就绪：此时静默丢弃，
+        // 不 panic——否则 boot 期间任何 log（如 PLIC probe）会触发 console()
+        // 的 expect 而死循环。运行期 console 必已就绪，正常输出。
+        if let Some(con) = crate::driver::try_console() {
+            con.write(s.as_bytes());
+        }
         Ok(())
     }
 }

@@ -19,14 +19,14 @@ pub struct QemuVirt;
 impl Board for QemuVirt {
     fn init() {
         // 1. 注入 rt-async 专属 DTB（内嵌模式）。
-        //    路径: src -> qemu-virt -> chips -> platform -> modules -> rt-async 根 (5 级 ../)。
-        static RT_ASYNC_DTB: &[u8] =
-            include_bytes!("../../../../../its/rt-async-qemu-virt.dtb");
+        //    .dtb 由 build.rs 在编译期用 dtc 从 .dts 生成到 OUT_DIR，路径经
+        //    cargo:rustc-env=QEMU_VIRT_DTB_PATH 传入（不再追踪 .dtb 产物）。
+        static RT_ASYNC_DTB: &[u8] = include_bytes!(env!("QEMU_VIRT_DTB_PATH"));
         platform::dtb::init_dtb(RT_ASYNC_DTB);
 
         // 2. 注册板级 driver 列表（platform 内置默认列表）。
         let drivers = platform::drivers::default_drivers();
-        platform::driver::set_drivers(drivers);
+        platform::driver::DRIVERS.set(drivers);
 
         // 3. 遍历 DT 实例化 driver（probe 各节点 → 填充 registry 槽位）。
         platform::driver::boot();

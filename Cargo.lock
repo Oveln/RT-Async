@@ -262,6 +262,7 @@ version = "0.1.0"
 dependencies = [
  "extern-trait",
  "fdt-parser",
+ "heapless",
  "log",
  "portable-atomic",
  "riscv",

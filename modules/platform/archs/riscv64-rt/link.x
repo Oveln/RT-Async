@@ -41,9 +41,10 @@ PROVIDE(LoadPageFault = ExceptionHandler);
 PROVIDE(StorePageFault = ExceptionHandler);
 
 PROVIDE(SupervisorSoft = DefaultHandler);
-PROVIDE(__Inner_MachineSoft = DefaultHandler);
+EXTERN(_default_interrupt_handler);
+PROVIDE(__Inner_MachineSoft = _default_interrupt_handler);
 PROVIDE(SupervisorTimer = DefaultHandler);
-PROVIDE(MachineTimer = DefaultHandler);
+PROVIDE(MachineTimer = _default_interrupt_handler);
 PROVIDE(SupervisorExternal = DefaultHandler);
 EXTERN(__rt_machine_external);
 PROVIDE(MachineExternal = __rt_machine_external);
