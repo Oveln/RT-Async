@@ -146,16 +146,30 @@ pub static INTC: Slot<&'static dyn InterruptController> = Slot::new();
 pub static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
 
 /// 串口设备注册表（多实例）。driver 的 probe 经 [`DeviceRegistry::register`] 登记，
-/// [`derive_console`] 据 chosen 从中选出默认 console。
+/// `try_derive_console` 据 chosen 从中选出默认 console。
 ///
 /// 单串口板（如 qemu-virt）仅一项；多串口板按 `chosen.stdout-path` 选定。
 pub static SERIALS: DeviceRegistry<&'static dyn Serial, 4> = DeviceRegistry::new();
 
 /// 取默认 console。若未注册则 panic（与 timer/ipi/reset 一致）。
+///
+/// 注意：`boot()` 早期 console 可能尚未就绪（由 `try_derive_console` 在 boot
+/// 的 probe 循环内、首个 Serial probe 后据 `chosen.stdout-path` 派生）。boot
+/// 期间需输出日志的代码（如 logger、panic handler）应使用 [`try_console`]
+/// 容错取用，而非本函数。
 pub fn console() -> &'static dyn Serial {
     *CONSOLE
         .get()
         .expect("console: no Serial device registered")
+}
+
+/// 取默认 console，未就绪时返回 `None`（不 panic）。
+///
+/// 供 [`crate::logger`] 等 boot 早期路径使用——此时 console 可能尚未由
+/// `try_derive_console` 派生。运行期（调度器启动后）console 必已就绪，
+/// 应用代码宜直接用 [`console`]。
+pub fn try_console() -> Option<&'static dyn Serial> {
+    CONSOLE.get().copied()
 }
 
 /// 取默认 timer。若未注册则 panic（timer 不可缺，无静默降级语义）。
@@ -210,7 +224,7 @@ pub fn boot() {
             crate::bus::bus_stack_pop_to(node.level);
         }
         // 对每个 driver 检查节点的 compatible 列表是否有任一命中。
-        // node.compatibles() 返回的迭代器每次调用都从头开始，无需收集到栈缓冲，
+        // node.compatibles() 迭代器每次调用都从头开始，无需收集到栈缓冲，
         // 也无 compatible 个数上限。
         for drv in *drivers {
             let matched = node
@@ -220,16 +234,30 @@ pub fn boot() {
                 drv.probe(&node);
             }
         }
+        // 派生 console：首个 Serial 设备 probe 后立即派生（而非等到 boot 末尾），
+        // 使后续 probe（如 PLIC 的 log::info）能经 logger 正常输出——logger 在
+        // console 未就绪时虽经 [`try_console`] 容错不 panic，但会丢弃日志。
+        // DT 中 serial 节点先于 plic（DFS 先序），故此处保证 PLIC probe 前
+        // console 已就绪。CONSOLE 已派生后此调用为幂等 no-op。
+        if CONSOLE.get().is_none() {
+            try_derive_console(fdt);
+        }
         prev_level = node.level;
     }
 
-    derive_console(fdt);
+    // 兜底：确保 boot 返回时 console 已派生（如 DTS 无 chosen 或无 serial）。
+    try_derive_console(fdt);
 }
 
 /// 从设备树 `chosen { stdout-path }` 派生默认 console。
 ///
-/// 在 [`boot`] 遍历完所有节点（各 serial driver 已把实例 register 进
-/// [`SERIALS`]）后调用。`fdt_parser` 已处理 alias/路径/`"name:baud"` 后缀。
+/// 在 [`boot`] 的 probe 循环中，首个 Serial 设备 probe 后即调用（而非等到
+/// boot 末尾），保证后续 probe 的日志（如 PLIC 的 `log::info`）能正常输出。
+/// `fdt_parser` 已处理 alias/路径/`"name:baud"` 后缀。
+///
+/// **不 panic**：若无 Serial 设备被 probe（如纯 timer 板），则静默返回——
+/// console 非所有板的必需项，缺失时 [`logger`] 经 [`try_console`] 容错。
+/// 真正缺 console 的板，运行期调 [`console`] 时才 panic。
 ///
 /// 当前为单串口板简化版：`SERIALS` 仅一项时直接提升为 console；
 /// `chosen.stdout` 仅作「期望有 console」的校验。多串口按 `stdout.node.name`
@@ -237,22 +265,17 @@ pub fn boot() {
 ///
 /// `std-chip`（host 桩）不经此路径——它无 DTB、不调 `boot()`，直接
 /// `CONSOLE.set(...)`。
-fn derive_console(fdt: &Fdt<'static>) {
+fn try_derive_console(fdt: &Fdt<'static>) {
     let has_chosen = fdt.chosen().and_then(|c| c.stdout()).is_some();
-    let dev = SERIALS
-        .iter()
-        .next()
-        .copied()
-        .unwrap_or_else(|| {
-            panic!(
-                "derive_console: no Serial device probed{}",
-                if has_chosen {
-                    " (chosen.stdout-path set but no serial driver matched)"
-                } else {
-                    ""
-                }
-            )
-        });
+    // 无 Serial 被 probe：console 非所有板的必需项，静默返回。
+    // 但若 chosen.stdout-path 已设却无 serial 驱动匹配，记一条警告——
+    // 否则该配置错误只会在运行期首次 console() 时以笼统的 panic 暴露。
+    let Some(dev) = SERIALS.iter().next().copied() else {
+        if has_chosen {
+            log::warn!("chosen.stdout-path set but no serial driver matched");
+        }
+        return;
+    };
     // 注：单串口板下 chosen 仅作「期望有 console」的校验；多串口按
     // stdout.node.name 在 SERIALS 中匹配留待未来（需 driver 记录节点名）。
     CONSOLE.set(dev);
