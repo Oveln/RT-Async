@@ -62,6 +62,32 @@ pub trait Serial: Send + Sync {
     fn has_data(&self) -> bool {
         self.read().is_some()
     }
+    /// 中断驱动 RX 的 poll 原语。
+    ///
+    /// 由 async `SerialRx` Future 经 registry 调用，实现"关中断 → 注册 waker
+    /// → 重检 → 开中断"的 ISR/task 竞争修复模式。驱动返回 [`SerialRxStatus`]
+    /// 表达当前状态。
+    ///
+    /// 默认返回 [`SerialRxStatus::Unsupported`]——不支持中断驱动 RX 的驱动
+    /// （含 host 桩）静默降级，调用方应回退轮询。
+    ///
+    /// 该方法与 [`SerialRxStatus`] **不**做 `#[cfg]` 门控：它们始终存在于
+    /// trait/enum 中，避免跨 crate（futures）传递 `riscv64` feature。
+    /// 不支持中断驱动 RX 的驱动（含 host 桩）依赖默认实现返回 `Unsupported`；
+    /// 仅在具体驱动的 override 内部用 cfg 门控 arch 专有逻辑（关/开中断）。
+    fn rx_register_waker(&self, _cx: &mut core::task::Context<'_>) -> SerialRxStatus {
+        SerialRxStatus::Unsupported
+    }
+}
+
+/// [`Serial::rx_register_waker`] 的返回状态。
+pub enum SerialRxStatus {
+    /// 已就绪一个字节。
+    Ready(u8),
+    /// 已注册 waker，等待 ISR 唤醒；调用方应返回 `Poll::Pending`。
+    Pending,
+    /// 该驱动不支持中断驱动 RX（默认）；调用方应回退轮询。
+    Unsupported,
 }
 
 /// 中断控制器（Platform-Level Interrupt Controller / 核内中断路由）。

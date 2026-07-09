@@ -32,7 +32,7 @@ pub mod logger;
 pub use logger::Logger;
 
 // 便捷 re-export：上层（executor / futures / apps）直接取用。
-pub use device::{Driver, InterruptController, Ipi, Reset, Serial, Timer};
+pub use device::{Driver, InterruptController, Ipi, Reset, Serial, SerialRxStatus, Timer};
 pub use driver::{
     boot, console, intctl, ipi, reset, set_console, set_drivers, set_intctl, set_ipi, set_reset,
     set_timer, timer,
