@@ -75,6 +75,18 @@ pub extern "C" fn _default_start_trap() -> ! {
 #[no_mangle]
 pub extern "C" fn _default_setup_interrupts() {}
 
+/// 默认中断处理桩——空操作并返回。
+///
+/// 供链接脚本 `PROVIDE` 作「用户未覆盖即安全忽略」的兜底，区别于
+/// [`_default_abort`]（死循环）。典型用户是 `__Inner_MachineSoft`：它由
+/// `#[executor::main]` 生成的 `MachineSoft` ISR 在进入调度器前调用；用户未提供
+/// `#[executor::interrupt] fn MachineSoft` 时若兜底到 `abort`（wfi 死循环），首个
+/// MSI 一来就把整个调度器锁死（MIE=0 + wfi，再无中断能唤醒）。此处改空返回，
+/// 让 ISR 继续走到 `clear_pend()` + 调度循环。
+#[doc(hidden)]
+#[no_mangle]
+pub extern "C" fn _default_interrupt_handler(_tf: &mut TrapFrame) {}
+
 // ── init 钩子（供 platform::init() 调用）──────────────────────────────────
 
 /// arch 级早期初始化钩子。默认空实现；arch crate 可按需扩展。
