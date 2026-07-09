@@ -90,6 +90,50 @@ pub enum SerialRxStatus {
     Unsupported,
 }
 
+/// I2C 总线控制器功能。
+///
+/// controller driver 实现，经 [`crate::bus`] 注册进 `I2C_BUSES`；
+/// child device（eeprom/传感器）经 [`crate::bus::current_i2c`] 取所属 bus
+/// 实例收发，不直接 MMIO。对标 Linux `i2c_adapter` / `i2c_client`。
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(dead_code)]
+pub trait I2cBus: Send + Sync {
+    /// 在 `addr` 上执行一次 I2C 传输（可能含多段读写）。
+    fn transfer(&self, addr: u8, msg: &mut [I2cMsg<'_>]) -> Result<(), I2cError>;
+}
+
+/// I2C 传输的一段（读或写）。
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(dead_code)]
+pub enum I2cMsg<'a> {
+    /// 主机→从机写。
+    Write(&'a [u8]),
+    /// 从机→主机读（缓冲区在传输中被填充）。
+    Read(&'a mut [u8]),
+}
+
+/// I2C 传输错误。无具体硬件时仅占位。
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(dead_code)]
+pub struct I2cError;
+
+/// SPI 总线控制器功能（与 [`I2cBus`] 同构）。
+///
+/// controller driver 实现并注册；child device 经
+/// [`crate::bus::current_spi`] 取 bus 实例收发。对标 Linux `spi_controller`。
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(dead_code)]
+pub trait SpiBus: Send + Sync {
+    /// 全双工 SPI 传输：`write` 的字节同时钟移出，移入的字节填入 `read`。
+    /// `read` 与 `write` 等长；较短的一方补零/忽略。
+    fn transfer(&self, write: &[u8], read: &mut [u8]) -> Result<(), SpiError>;
+}
+
+/// SPI 传输错误。无具体硬件时仅占位。
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(dead_code)]
+pub struct SpiError;
+
 /// 中断控制器（Platform-Level Interrupt Controller / 核内中断路由）。
 ///
 /// 外设通过 PLIC 等中断控制器汇总到 hart 的 Machine External 中断线。

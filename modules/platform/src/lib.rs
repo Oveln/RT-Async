@@ -23,6 +23,7 @@ pub use arch::{disable_interrupts, enable_interrupts, enable_mtimer, idle};
 #[cfg(feature = "riscv64")]
 pub use riscv64_rt as arch;
 
+pub mod bus;
 pub mod device;
 pub mod driver;
 pub mod drivers;
@@ -32,9 +33,15 @@ pub mod logger;
 pub use logger::Logger;
 
 // 便捷 re-export：上层（executor / futures / apps）直接取用。
-pub use device::{Driver, InterruptController, Ipi, Reset, Serial, SerialRxStatus, Timer};
+pub use device::{
+    Driver, I2cBus, I2cError, I2cMsg, InterruptController, Ipi, Reset, Serial, SerialRxStatus,
+    SpiBus, SpiError, Timer,
+};
 pub use driver::{boot, console, intctl, ipi, reset, timer, DeviceRegistry, Slot};
 pub use irq::{dispatch_external, register_irq, IrqHandler};
+// 消费方：未来 i2c/spi controller + child driver。
+#[allow(unused_imports)]
+pub use bus::{current_i2c, current_spi, push_i2c, push_spi, I2C_BUSES, SPI_BUSES};
 
 static LOGGER: Logger = Logger::new();
 

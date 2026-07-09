@@ -186,6 +186,12 @@ pub fn intctl() -> &'static dyn InterruptController {
 /// 对每个 DT 节点，按 `compatible` 匹配 [`DRIVERS`] 槽注入的 driver，
 /// 命中则调 [`Driver::probe`]。
 ///
+/// 遍历维护深度感知的 bus 栈（见 [`crate::bus`]）：`all_nodes()` 按 DFS 先序
+/// （父先于子）产出节点，`node.level` 反映深度。进入更深的节点前，controller
+/// 已被 probe 并 push 进 bus 栈；当 `node.level` 回退（离开某 controller 子树）
+/// 时调 [`crate::bus::bus_stack_pop_to`] 清栈，保证后续 child probe 取到正确的
+/// 父 bus（或回到根时无活跃 bus）。
+///
 /// # Panics
 /// 若 [`DRIVERS`] 未填充则 panic。
 pub fn boot() {
@@ -195,7 +201,14 @@ pub fn boot() {
 
     let fdt: &Fdt<'static> = crate::dtb::dt();
 
+    crate::bus::bus_stack_reset();
+    let mut prev_level: usize = 1usize;
+
     for node in fdt.all_nodes() {
+        // 深度回退：离开了之前 controller 的子树，弹出更深的 bus 索引。
+        if node.level < prev_level {
+            crate::bus::bus_stack_pop_to(node.level);
+        }
         // 对每个 driver 检查节点的 compatible 列表是否有任一命中。
         // node.compatibles() 返回的迭代器每次调用都从头开始，无需收集到栈缓冲，
         // 也无 compatible 个数上限。
@@ -207,6 +220,7 @@ pub fn boot() {
                 drv.probe(&node);
             }
         }
+        prev_level = node.level;
     }
 
     derive_console(fdt);
