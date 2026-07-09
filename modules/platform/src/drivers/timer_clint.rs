@@ -93,7 +93,7 @@ impl Driver for ClintTimer {
         let freq = read_timebase_freq().unwrap_or(10_000_000);
         FREQ.store(freq as usize, Ordering::Release);
 
-        crate::driver::set_timer(&INSTANCE);
+        crate::driver::TIMER.set(&INSTANCE);
     }
 }
 

@@ -46,6 +46,6 @@ impl Driver for SifiveTest {
             .next()
             .expect("sifive test: empty reg");
         BASE.store(reg.address as usize, Ordering::Release);
-        crate::driver::set_reset(&INSTANCE);
+        crate::driver::RESET.set(&INSTANCE);
     }
 }

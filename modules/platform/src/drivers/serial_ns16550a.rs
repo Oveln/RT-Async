@@ -158,7 +158,7 @@ impl Driver for Ns16550a {
         RX.head.store(0, Ordering::Release);
         RX.tail.store(0, Ordering::Release);
 
-        crate::driver::set_console(&INSTANCE);
+        crate::driver::CONSOLE.set(&INSTANCE);
     }
 }
 

@@ -57,9 +57,9 @@ static STD_IPI: StdIpi = StdIpi;
 #[extern_trait]
 impl Board for StdChip {
     fn init() {
-        platform::driver::set_console(&STD_SERIAL);
-        platform::driver::set_timer(&STD_TIMER);
-        platform::driver::set_reset(&STD_RESET);
-        platform::driver::set_ipi(&STD_IPI);
+        platform::driver::CONSOLE.set(&STD_SERIAL);
+        platform::driver::TIMER.set(&STD_TIMER);
+        platform::driver::RESET.set(&STD_RESET);
+        platform::driver::IPI.set(&STD_IPI);
     }
 }
