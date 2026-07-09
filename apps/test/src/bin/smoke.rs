@@ -9,13 +9,12 @@
 #[cfg(feature = "qemu-virt")]
 extern crate qemu_virt;
 
-use platform::Chip;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rust_main() -> ! {
     platform::init(log::LevelFilter::Info);
     log::info!("test/smoke: boot OK, shutting down");
-    platform::ChipImpl::shutdown()
+    platform::reset().shutdown()
 }
 
 #[unsafe(no_mangle)]

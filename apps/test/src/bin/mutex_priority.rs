@@ -13,7 +13,6 @@ use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::Chip;
 static DATA: futures::mutex::Mutex<u32, 2> = futures::mutex::Mutex::new(0);
 
 #[executor::task]
@@ -43,5 +42,5 @@ fn main(spawner: Pin<&'static Spawner<4>>) {
     }
 
     test::assert_log(&["ok"]);
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }

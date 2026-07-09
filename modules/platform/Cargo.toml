@@ -6,8 +6,10 @@ edition = "2024"
 [dependencies]
 extern-trait = "0.4.3"
 riscv64-rt = { path = "archs/riscv64-rt", optional = true }
+riscv = { version = "0.16.0", optional = true, default-features = false, features = ["critical-section-single-hart"] }
 log = { version = "0.4", default-features = false }
 portable-atomic = { version = "1", default-features = false }
+fdt-parser = "0.4.19"
 
 [features]
-riscv64 = ["dep:riscv64-rt"]
+riscv64 = ["dep:riscv64-rt", "dep:riscv", "riscv64-rt/clear_bss"]

@@ -46,6 +46,11 @@ pub unsafe fn enable_mei() {
     unsafe { riscv::register::mie::set_mext() };
 }
 
+/// Enable machine timer interrupt (sets mie.MTIE).
+pub unsafe fn enable_mtimer() {
+    unsafe { riscv::register::mie::set_mtimer() };
+}
+
 pub fn idle() {
     riscv::asm::wfi();
 }

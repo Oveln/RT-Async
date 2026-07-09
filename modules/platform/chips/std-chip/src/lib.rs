@@ -1,43 +1,65 @@
-#[allow(unreachable_code)]
+//! # std 芯片实现（host 单测桩）
+//!
+//! 为 host `std` 环境提供 [`Board`] 实现和最小 driver 注册，
+//! 使 executor / futures 的 host 单测（`cargo test`）可正常运行。
+//!
+//! 所有 driver 均为桩：console 走 `print!`，timer 返回固定值，
+//! reset 调 `exit(0)`，ipi 为空操作。
+
+#![allow(unreachable_code)]
 use std::process::exit;
 
 use extern_trait::extern_trait;
-use platform::{Chip, TimerChip};
+use platform::{Board};
 
+/// std 环境的板级实现。
 pub struct StdChip;
 
-#[extern_trait]
-impl Chip for StdChip {
-    fn board_init() {}
+// ── 桩驱动 ───────────────────────────────────────────────────────────
 
-    fn shutdown() -> ! {
-        exit(0)
-    }
-
-    fn put_str(s: &str) {
+struct StdSerial;
+impl platform::Serial for StdSerial {
+    fn write(&self, buf: &[u8]) {
+        let s = core::str::from_utf8(buf).unwrap_or("<non-utf8>");
         print!("{}", s);
     }
-
-    unsafe fn pend() {}
-
-    unsafe fn clear_pend() {}
 }
 
-#[extern_trait]
-impl TimerChip for StdChip {
-    fn freq_hz() -> u32 {
+struct StdTimer;
+impl platform::Timer for StdTimer {
+    fn freq_hz(&self) -> u32 {
         1_000_000
     }
-
-    fn now_ticks() -> u64 {
-        todo!()
+    fn now(&self) -> u64 {
+        0
     }
+    fn set_deadline(&self, _tick: u64) {}
+}
 
-    fn set_deadline(_tick: u64) {
-        todo!()
+struct StdReset;
+impl platform::Reset for StdReset {
+    fn shutdown(&self) -> ! {
+        exit(0)
     }
+}
 
-    unsafe fn enable_timer_irq() {
-        todo!()
+struct StdIpi;
+impl platform::Ipi for StdIpi {
+    unsafe fn send(&self) {}
+    unsafe fn clear(&self) {}
+}
+
+static STD_SERIAL: StdSerial = StdSerial;
+static STD_TIMER: StdTimer = StdTimer;
+static STD_RESET: StdReset = StdReset;
+static STD_IPI: StdIpi = StdIpi;
+
+#[extern_trait]
+impl Board for StdChip {
+    fn init() {
+        platform::driver::set_console(&STD_SERIAL);
+        platform::driver::set_timer(&STD_TIMER);
+        platform::driver::set_reset(&STD_RESET);
+        platform::driver::set_ipi(&STD_IPI);
     }
 }

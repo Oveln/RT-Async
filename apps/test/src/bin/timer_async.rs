@@ -14,7 +14,6 @@ extern crate qemu_virt;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use fugit::ExtU64;
-use platform::Chip;
 
 static STEP: AtomicUsize = AtomicUsize::new(0);
 
@@ -31,8 +30,8 @@ async fn timer_task() {
     futures::timer::after(1.millis()).await;
     STEP.store(3, Ordering::Relaxed);
 
-    platform::ChipImpl::put_str("timer_async test passed\n");
-    platform::ChipImpl::shutdown();
+    platform::console().write(b"timer_async test passed\n");
+    platform::reset().shutdown();
 }
 
 #[executor::interrupt]

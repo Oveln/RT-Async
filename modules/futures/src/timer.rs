@@ -1,4 +1,4 @@
-//! Async timer API for the active platform.
+//! Async timer API backed by the platform's [`platform::Timer`] driver.
 //!
 //! ```ignore
 //! use fugit::ExtU64;
@@ -10,11 +10,7 @@
 //! ```ignore
 //! #[executor::interrupt]
 //! fn MachineTimer(_tf: &mut TrapFrame) {
-//!     TimerChipImpl::set_deadline(u64::MAX);
-//!     let next = futures::timer::TIMER_QUEUE.dequeue_expired(TimerChipImpl::now_ticks());
-//!     if let Some(d) = next {
-//!         TimerChipImpl::set_deadline(d);
-//!     }
+//!     futures::timer::handle_timer_isr();
 //! }
 //! ```
 
@@ -23,7 +19,6 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
 use fugit::Duration;
-use platform::{TimerChip, TimerChipImpl};
 
 /// Global timer queue (capacity 16).
 ///
@@ -45,9 +40,9 @@ pub type TimerDuration = Duration<u64, 1, 1_000_000_000>;
 /// timer::after(500.micros()).await;
 /// ```
 pub fn after(duration: TimerDuration) -> TimerDelay {
-    let hw_freq = TimerChipImpl::freq_hz() as u128;
+    let hw_freq = platform::timer().freq_hz() as u128;
     let ticks = (duration.as_ticks() as u128 * hw_freq / 1_000_000_000) as u64;
-    let deadline = TimerChipImpl::now_ticks().saturating_add(ticks);
+    let deadline = platform::timer().now().saturating_add(ticks);
     TimerDelay {
         deadline,
         registered: false,
@@ -55,7 +50,7 @@ pub fn after(duration: TimerDuration) -> TimerDelay {
     }
 }
 
-/// Future returned by [`after`]. Completes when `TimerChipImpl::now_ticks() >= deadline`.
+/// Future returned by [`after`]. Completes when `now >= deadline`.
 pub struct TimerDelay {
     deadline: u64,
     registered: bool,
@@ -66,9 +61,7 @@ impl Future for TimerDelay {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        if TimerChipImpl::now_ticks() >= self.deadline {
-            // Timer already expired — cancel any pending entry and clear registered
-            // flag so Drop does not try to cancel again.
+        if platform::timer().now() >= self.deadline {
             self.registered = false;
             Poll::Ready(())
         } else {
@@ -78,7 +71,7 @@ impl Future for TimerDelay {
                 let is_earliest =
                     unsafe { TIMER_QUEUE.schedule(self.deadline, wake_trampoline, data) };
                 if is_earliest {
-                    TimerChipImpl::set_deadline(self.deadline);
+                    platform::timer().set_deadline(self.deadline);
                 }
                 self.registered = true;
             }
@@ -116,9 +109,9 @@ unsafe fn wake_trampoline(data: *mut ()) {
 /// }
 /// ```
 pub fn handle_timer_isr() {
-    TimerChipImpl::set_deadline(u64::MAX);
-    let next = TIMER_QUEUE.dequeue_expired(TimerChipImpl::now_ticks());
+    platform::timer().set_deadline(u64::MAX);
+    let next = TIMER_QUEUE.dequeue_expired(platform::timer().now());
     if let Some(d) = next {
-        TimerChipImpl::set_deadline(d);
+        platform::timer().set_deadline(d);
     }
 }

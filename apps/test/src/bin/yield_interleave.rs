@@ -11,7 +11,6 @@ use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::Chip;
 async fn yield_once(label: &'static str) {
     unsafe {
         test::record(label);
@@ -54,5 +53,5 @@ fn main(spawner: Pin<&'static Spawner<4>>) {
 
     // a poll → a yield → b poll → b yield → a resume → b resume
     test::assert_log(&["a", "b", "a", "b"]);
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }

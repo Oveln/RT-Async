@@ -15,7 +15,6 @@ use core::pin::Pin;
 
 use executor::priority::Priority;
 use executor::spawner::Spawner;
-use platform::Chip;
 static DATA: futures::mutex::Mutex<u32, 2> = futures::mutex::Mutex::new(0);
 
 #[executor::task]
@@ -47,5 +46,5 @@ fn main(spawner: Pin<&'static Spawner<4>>) {
 
     // 同优先级协作调度：writer 先运行，lock → writer unlock → reader lock → reader done
     test::assert_log(&["w_lock", "w_unlock", "r_lock", "r_done"]);
-    platform::ChipImpl::shutdown();
+    platform::reset().shutdown();
 }

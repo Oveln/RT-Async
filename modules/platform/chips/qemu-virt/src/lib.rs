@@ -1,71 +1,34 @@
-//! # QEMU Virt Chip 实现
+//! # QEMU Virt Chip 实现（子仓库自包含模式）
 //!
-//! 为 QEMU `virt` 平台（RISC-V 64）提供 [`Chip`] 和 [`TimerChip`] 的具体实现。
+//! 为 QEMU `virt` 平台（RISC-V 64）提供 [`Board`] 的实现。
+//! 负责 DTB 注入、driver 列表注册和 DT 遍历实例化。
+//!
+//! 子仓库的 demo / test 均为 TX 单测，不依赖外部中断，故此处不注册
+//! UART RX IRQ handler。中断驱动 RX 由主仓库 chip crate 配置。
 
 #![no_std]
 #![allow(unreachable_code)]
 
 use extern_trait::extern_trait;
-use platform::{Chip, TimerChip};
+use platform::Board;
 
-/// QEMU virt 串口寄存器基址（NS16550A 兼容 UART）。
-const UART_BASE: usize = 0x1000_0000;
-/// QEMU virt 关机寄存器基址（SiFive Test 设备）。
-const SIFIVE_TEST_BASE: usize = 0x100_000;
-/// CLINT msip 寄存器（hart 0）。
-const CLINT_MSIP: usize = 0x2000_000;
-/// CLINT mtimecmp 寄存器（hart 0）。
-const CLINT_MTIMECMP: usize = 0x200_4000;
-/// CLINT mtime 寄存器。
-const CLINT_MTIME: usize = 0x200_BFF8;
-
-/// QEMU virt 平台的 Chip 实现。
+/// QEMU virt 平台的板级实现。
 pub struct QemuVirt;
 
 #[extern_trait]
-impl Chip for QemuVirt {
-    fn board_init() {}
+impl Board for QemuVirt {
+    fn init() {
+        // 1. 注入 rt-async 专属 DTB（内嵌模式）。
+        //    路径: src -> qemu-virt -> chips -> platform -> modules -> rt-async 根 (5 级 ../)。
+        static RT_ASYNC_DTB: &[u8] =
+            include_bytes!("../../../../../its/rt-async-qemu-virt.dtb");
+        platform::dtb::init_dtb(RT_ASYNC_DTB);
 
-    fn shutdown() -> ! {
-        unsafe {
-            core::ptr::write_volatile(SIFIVE_TEST_BASE as *mut u32, 0x5555);
-        }
-        loop {}
-    }
+        // 2. 注册板级 driver 列表（platform 内置默认列表）。
+        let drivers = platform::drivers::default_drivers();
+        platform::driver::set_drivers(drivers);
 
-    fn put_str(s: &str) {
-        for &byte in s.as_bytes() {
-            unsafe {
-                core::ptr::write_volatile(UART_BASE as *mut u8, byte);
-            }
-        }
-    }
-
-    unsafe fn pend() {
-        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 1) };
-    }
-
-    unsafe fn clear_pend() {
-        unsafe { core::ptr::write_volatile(CLINT_MSIP as *mut u32, 0) };
-    }
-}
-
-#[extern_trait]
-impl TimerChip for QemuVirt {
-    fn freq_hz() -> u32 {
-        10_000_000
-    }
-
-    fn now_ticks() -> u64 {
-        unsafe { core::ptr::read_volatile(CLINT_MTIME as *const u64) }
-    }
-
-    fn set_deadline(tick: u64) {
-        unsafe { core::ptr::write_volatile(CLINT_MTIMECMP as *mut u64, tick) };
-    }
-
-    unsafe fn enable_timer_irq() {
-        Self::set_deadline(u64::MAX);
-        unsafe { riscv::register::mie::set_mtimer() };
+        // 3. 遍历 DT 实例化 driver（probe 各节点 → 填充 registry 槽位）。
+        platform::driver::boot();
     }
 }
