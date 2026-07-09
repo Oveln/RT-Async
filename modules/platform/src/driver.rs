@@ -145,6 +145,12 @@ pub static INTC: Slot<&'static dyn InterruptController> = Slot::new();
 /// 板级提供的 driver 列表（`&'static [&'static dyn Driver]` 是胖指针）。
 pub static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
 
+/// 串口设备注册表（多实例）。driver 的 probe 经 [`DeviceRegistry::register`] 登记，
+/// [`derive_console`] 据 chosen 从中选出默认 console。
+///
+/// 单串口板（如 qemu-virt）仅一项；多串口板按 `chosen.stdout-path` 选定。
+pub static SERIALS: DeviceRegistry<&'static dyn Serial, 4> = DeviceRegistry::new();
+
 /// 取默认 console。若未注册则 panic（与 timer/ipi/reset 一致）。
 pub fn console() -> &'static dyn Serial {
     *CONSOLE
@@ -202,4 +208,38 @@ pub fn boot() {
             }
         }
     }
+
+    derive_console(fdt);
+}
+
+/// 从设备树 `chosen { stdout-path }` 派生默认 console。
+///
+/// 在 [`boot`] 遍历完所有节点（各 serial driver 已把实例 register 进
+/// [`SERIALS`]）后调用。`fdt_parser` 已处理 alias/路径/`"name:baud"` 后缀。
+///
+/// 当前为单串口板简化版：`SERIALS` 仅一项时直接提升为 console；
+/// `chosen.stdout` 仅作「期望有 console」的校验。多串口按 `stdout.node.name`
+/// 在 SERIALS 中匹配留待未来（需 driver 记录节点名）。
+///
+/// `std-chip`（host 桩）不经此路径——它无 DTB、不调 `boot()`，直接
+/// `CONSOLE.set(...)`。
+fn derive_console(fdt: &Fdt<'static>) {
+    let has_chosen = fdt.chosen().and_then(|c| c.stdout()).is_some();
+    let dev = SERIALS
+        .iter()
+        .next()
+        .copied()
+        .unwrap_or_else(|| {
+            panic!(
+                "derive_console: no Serial device probed{}",
+                if has_chosen {
+                    " (chosen.stdout-path set but no serial driver matched)"
+                } else {
+                    ""
+                }
+            )
+        });
+    // 注：单串口板下 chosen 仅作「期望有 console」的校验；多串口按
+    // stdout.node.name 在 SERIALS 中匹配留待未来（需 driver 记录节点名）。
+    CONSOLE.set(dev);
 }

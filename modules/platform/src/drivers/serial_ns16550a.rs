@@ -158,7 +158,9 @@ impl Driver for Ns16550a {
         RX.head.store(0, Ordering::Release);
         RX.tail.store(0, Ordering::Release);
 
-        crate::driver::CONSOLE.set(&INSTANCE);
+        // 登记进多实例注册表；默认 console 由 boot() 的 derive_console 据
+        // chosen.stdout-path 选定（不再由 probe 自命）。
+        crate::driver::SERIALS.register(&INSTANCE);
     }
 }
 
