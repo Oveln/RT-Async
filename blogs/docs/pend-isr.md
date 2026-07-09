@@ -38,6 +38,10 @@ MachineSoft ISR:
 
 `pend()` 在触发 MSI 前将 `PEND_MARKER` 置 `true`，`clear_pend()` 读取并清除它。
 
+## pend 与 IPI 设备
+
+`pend()` / `clear_pend()` 不再直接操作固定硬件寄存器，而是经 driver registry 取 IPI 设备（`driver::ipi()`）。`pend()` 内部置 `PEND_MARKER` 后调用 `driver::ipi().send()`，`clear_pend()` 在 ISR 早期 `swap` 掉 `PEND_MARKER` 后调用 `driver::ipi().clear()`。具体 IPI 硬件实现（QEMU virt 的 CLINT MSIP / K3 的 PXA IPI）由板级 driver 的 `Ipi` trait 实现决定，平台层与调度器本身与硬件解耦。
+
 ## 嵌套抢占
 
 `run(token)` 执行期间 `MIE=1`，允许更高优先级 executor 在当前 executor 的栈帧之上继续嵌套抢占。这是共享系统栈设计的关键：

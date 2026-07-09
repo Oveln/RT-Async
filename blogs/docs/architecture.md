@@ -39,14 +39,15 @@ RT-Async 是一个基于 Rust 的 `#![no_std]` async RTOS 内核，采用优先�
 ```
 rt-async/
 ├── modules/
-│   ├── executor/          # 核心调度器
-│   │   ├── spawner.rs     #   Spawner<N>：优先级抢占调度器
-│   │   ├── executor.rs    #   Executor：单优先级任务执行器
-│   │   ├── priority_bitmap.rs  # O(1) 两级优先级位图
-│   │   └── task/          #   TaskStorage、RunQueue、TaskInfo
+│   ├── executor/          # 核心调度器（Spawner/Executor/priority_bitmap/task）
 │   ├── executor-macro/    # 过程宏（#[task]、#[main]、#[interrupt]）
-│   ├── platform/          # 平台实现（RISC-V QEMU virt、std）
-│   └── platform-traits/   # Chip / TimerChip trait 定义
+│   ├── platform/          # 平台抽象 + driver model
+│   │   ├── src/           #   device.rs（trait）driver.rs（registry）bus.rs dtb.rs irq.rs
+│   │   │   └── drivers/   #     内置驱动（ns16550a/clint/sifive-plic/...）
+│   │   ├── archs/         #   架构相关（riscv64-rt：中断使能/TrapFrame/idle/link.x）
+│   │   └── chips/         #   板级实现（qemu-virt / std-chip）
+│   ├── futures/           # async 原语（SerialRx/Timer/Mutex）
+│   └── timer/             # 定时器队列
 └── apps/
     ├── demo/              # 示例程序
     └── test/              # 集成测试（QEMU 运行）
