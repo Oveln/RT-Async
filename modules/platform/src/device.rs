@@ -220,3 +220,28 @@ pub trait Reset: Send + Sync {
     /// 关机（不掉电则死循环）。永不返回。
     fn shutdown(&self) -> !;
 }
+
+/// 核间 mailbox 信令（门铃模式）。
+///
+/// 纯信令语义：发送方写 FIFO 触发接收方硬件中断。不承载业务数据——
+/// 数据载荷走共享内存（如 ov-rpc）。每个实例对应一个 mailbox 硬件单元。
+pub trait Mailbox: Send + Sync {
+    /// 向指定通道写值，触发对端新消息中断。
+    /// channel 范围 0..NUM_CHANNELS。FIFO 满时写操作会被硬件丢弃——
+    /// 纯门铃场景不会满（每信令只写 1 个 word，深度 8），故不返回 Result。
+    fn signal(&self, channel: u8);
+
+    /// 读指定通道 FIFO 并返回对端写入的值。
+    /// 在 ISR 中调用以清空 FIFO、清除中断 pending。
+    /// FIFO 为空时读取值未定义，调用方应仅在确认有消息后调用。
+    fn ack(&self, channel: u8) -> u32;
+
+    /// 本 mailbox 实例在 PLIC 上的中断号。
+    fn irq(&self) -> u32;
+
+    /// 使能指定通道的新消息中断（置 IRQENABLE_SET 对应位）。
+    fn enable_new_msg_irq(&self, channel: u8);
+
+    /// 禁能指定通道的新消息中断（置 IRQENABLE_CLR 对应位）。
+    fn disable_new_msg_irq(&self, channel: u8);
+}

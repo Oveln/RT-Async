@@ -25,8 +25,8 @@
 use core::mem;
 use portable_atomic::{AtomicUsize, Ordering};
 
-/// 最大 IRQ 号 + 1。QEMU virt PLIC 有 53 个源，64 留有安全余量。
-pub const MAX_IRQ: usize = 64;
+/// 最大 IRQ 号 + 1。K3 Mailbox 中断号最高 69（+ 安全余量 → 96）。
+pub const MAX_IRQ: usize = 96;
 
 /// 外设 IRQ handler 类型。`irq` 参数是中断源 ID（claim 返回的值）。
 pub type IrqHandler = unsafe fn(irq: u32);
