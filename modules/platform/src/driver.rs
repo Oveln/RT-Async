@@ -28,7 +28,7 @@ use core::mem::MaybeUninit;
 use fdt_parser::Fdt;
 use portable_atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::device::{Driver, InterruptController, Ipi, Reset, Serial, Timer};
+use crate::device::{Driver, InterruptController, Ipi, PinController, Reset, Serial, Timer};
 
 /// 未初始化。
 const STATE_UNINIT: u8 = 0;
@@ -144,6 +144,10 @@ pub static RESET: Slot<&'static dyn Reset> = Slot::new();
 pub static INTC: Slot<&'static dyn InterruptController> = Slot::new();
 /// 板级提供的 driver 列表（`&'static [&'static dyn Driver]` 是胖指针）。
 pub static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
+/// pinctrl 控制器（pinctrl-single 等）。板级 pinctrl driver 在 probe 中
+/// `PINCTRL.set(...)` 注入。boot() 遍历 DT 时对每个外设节点在 probe 前调
+/// [`PinController::apply`] 应用 `pinctrl-0` 引脚配置。
+pub static PINCTRL: Slot<&'static dyn PinController> = Slot::new();
 
 /// 串口设备注册表（多实例）。driver 的 probe 经 [`DeviceRegistry::register`] 登记，
 /// `try_derive_console` 据 chosen 从中选出默认 console。
@@ -194,6 +198,15 @@ pub fn intctl() -> &'static dyn InterruptController {
         .expect("intctl: no InterruptController device registered")
 }
 
+/// 取 pinctrl 控制器，未就绪时返回 `None`（不 panic）。
+///
+/// 供 [`boot`] 在 DFS 循环中调用——pinctrl 节点先于外设节点被 probe
+/// （DFS 先序），外设 probe 时 pinctrl 已就绪；但 pinctrl controller 自身
+/// probe 时 `try_pinctrl()` 返回 `None`（它就是自己在被 probe）。
+pub fn try_pinctrl() -> Option<&'static dyn PinController> {
+    PINCTRL.get().copied()
+}
+
 /// 遍历设备树实例化所有 driver。
 ///
 /// 在 `init_dtb` 之后、调度器启动之前由板级 `board_init` 调用。
@@ -222,6 +235,13 @@ pub fn boot() {
         // 深度回退：离开了之前 controller 的子树，弹出更深的 bus 索引。
         if node.level < prev_level {
             crate::bus::bus_stack_pop_to(node.level);
+        }
+        // 应用 pinctrl-0：在外设 driver probe 之前配置引脚。
+        // pinctrl controller 节点（compatible = "pinctrl-single"）先于外设
+        // 节点被 probe（DFS 先序），此时 PINCTRL slot 已就绪；无 pinctrl-0
+        // 的节点（含 pinctrl controller 自身）apply 为 no-op。
+        if let Some(pc) = try_pinctrl() {
+            pc.apply(&node);
         }
         // 对每个 driver 检查节点的 compatible 列表是否有任一命中。
         // node.compatibles() 迭代器每次调用都从头开始，无需收集到栈缓冲，

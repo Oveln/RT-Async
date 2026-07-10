@@ -90,6 +90,20 @@ pub enum SerialRxStatus {
     Unsupported,
 }
 
+/// pinctrl 控制器功能。
+///
+/// controller driver 实现，经 probe 注册进 [`crate::driver::PINCTRL`] 全局槽。
+/// [`crate::driver::boot`] 遍历 DT 时，对每个节点在 driver probe 之前调用
+/// [`PinController::apply`]，使外设引脚配置在驱动看到硬件前就绪。
+///
+/// 实现侧解析节点的 `pinctrl-0` 属性（phandle → `_cfg` 子节点 →
+/// `pinctrl-single,pins` 的 (offset, value) 对），逐对写入 pinmux 寄存器。
+/// 无 `pinctrl-0` 的节点调用为 no-op。
+pub trait PinController: Send + Sync {
+    /// 为给定外设节点应用其 `pinctrl-0` 引脚配置。
+    fn apply(&self, node: &Node<'_>);
+}
+
 /// I2C 总线控制器功能。
 ///
 /// controller driver 实现，经 [`crate::bus`] 注册进 `I2C_BUSES`；
