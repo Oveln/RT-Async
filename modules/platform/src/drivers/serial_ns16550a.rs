@@ -17,28 +17,50 @@ use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use core::task::Waker;
 
 use fdt_parser::Node;
+use tock_registers::interfaces::{Readable, Writeable};
+use tock_registers::registers::{ReadOnly, ReadWrite};
+use tock_registers::{register_bitfields, register_structs};
 
 use crate::device::{Driver, Serial};
 
-// ── NS16550A 寄存器偏移 ──────────────────────────────────────────────
+// ── 寄存器定义（tock-registers）────────────────────────────────────
 
-const RBR_THR: usize = 0x00; // 读: RBR, 写: THR
-const IER: usize = 0x01;
-const IIR_FCR: usize = 0x02; // 读: IIR, 写: FCR
-const LCR: usize = 0x03;
-const LSR: usize = 0x05;
+register_bitfields![u8,
+    /// 中断使能寄存器 IER。
+    Ier [
+        ERBFI OFFSET(0) NUMBITS(1) [],  // RX 数据可用中断使能
+    ],
+    /// FIFO 控制寄存器 FCR。
+    Fcr [
+        ENABLE OFFSET(0) NUMBITS(1) [],  // FIFO 使能
+        CLR_RX OFFSET(1) NUMBITS(1) [],  // 清 RX FIFO
+        CLR_TX OFFSET(2) NUMBITS(1) [],  // 清 TX FIFO
+    ],
+    /// 线路控制寄存器 LCR。
+    Lcr [
+        WLEN8 OFFSET(0) NUMBITS(2) [],   // 8 数据位（值 0b11）
+        DLAB  OFFSET(7) NUMBITS(1) [],   // 除数锁存访问
+    ],
+    /// 线路状态寄存器 LSR。
+    Lsr [
+        DR   OFFSET(0) NUMBITS(1) [],   // 数据就绪
+        THRE OFFSET(5) NUMBITS(1) [],   // 发送保持寄存器空
+    ],
+];
 
-// IER 位
-const IER_ERBFI: u8 = 1 << 0; // RX 数据可用中断使能
-
-// FCR 位
-const FCR_ENABLE: u8 = 1 << 0; // FIFO 使能
-const FCR_CLR_RX: u8 = 1 << 1; // 清 RX FIFO
-const FCR_CLR_TX: u8 = 1 << 2; // 清 TX FIFO
-
-// LSR 位
-const LSR_DR: u8 = 1 << 0;   // 数据就绪
-const LSR_THRE: u8 = 1 << 5; // 发送保持寄存器空
+register_structs! {
+    /// NS16550A 寄存器映射（u8 寄存器，stride = 1）。
+    pub Ns16550aRegs {
+        (0x00 => rbr_thr: ReadWrite<u8>),                       // 读: RBR, 写: THR
+        (0x01 => ier:     ReadWrite<u8, Ier::Register>),
+        (0x02 => iir_fcr: ReadWrite<u8, Fcr::Register>),        // 读: IIR, 写: FCR
+        (0x03 => lcr:     ReadWrite<u8, Lcr::Register>),
+        (0x04 => _reserved),
+        (0x05 => lsr:     ReadOnly<u8, Lsr::Register>),
+        (0x06 => _reserved1),
+        (0x08 => @END),
+    }
+}
 
 // ── 驱动实例 ─────────────────────────────────────────────────────────
 
@@ -51,37 +73,39 @@ pub static INSTANCE: Ns16550a = Ns16550a;
 /// probe 写入的 MMIO 基址。0 表示尚未 probe。
 static BASE: AtomicUsize = AtomicUsize::new(0);
 
+/// 返回寄存器引用。probe 前调用为 panic。
+fn regs() -> &'static Ns16550aRegs {
+    let addr = BASE.load(Ordering::Acquire);
+    assert!(addr != 0, "ns16550a: not probed");
+    // SAFETY: addr 来自 probe 写入的 DT reg，指向已验证的 MMIO 区域。
+    // 单 hart 串行访问，无别名引用（tock-registers 内部用 volatile）。
+    unsafe { &*(addr as *const Ns16550aRegs) }
+}
+
 // ── Serial trait impl ────────────────────────────────────────────────
 
 impl Serial for Ns16550a {
     fn write(&self, buf: &[u8]) {
-        let base = BASE.load(Ordering::Acquire) as *mut u8;
+        let r = regs();
         for &byte in buf {
             // 等发送保持寄存器空（LSR.THRE = 1），防止连续写入时 FIFO 溢出丢字节。
-            unsafe {
-                while core::ptr::read_volatile(base.add(LSR)) & LSR_THRE == 0 {
-                    core::hint::spin_loop();
-                }
-                core::ptr::write_volatile(base, byte);
+            while !r.lsr.is_set(Lsr::THRE) {
+                core::hint::spin_loop();
             }
+            r.rbr_thr.set(byte);
         }
     }
 
     fn read(&self) -> Option<u8> {
-        let base = BASE.load(Ordering::Acquire) as *mut u8;
-        // SAFETY: 读 LSR 和 RBR 寄存器。
-        unsafe {
-            let lsr = core::ptr::read_volatile(base.add(LSR));
-            if lsr & LSR_DR == 0 {
-                return None;
-            }
-            Some(core::ptr::read_volatile(base.add(RBR_THR)))
+        let r = regs();
+        if !r.lsr.is_set(Lsr::DR) {
+            return None;
         }
+        Some(r.rbr_thr.get())
     }
 
     fn has_data(&self) -> bool {
-        let base = BASE.load(Ordering::Acquire) as *mut u8;
-        unsafe { core::ptr::read_volatile(base.add(LSR)) & LSR_DR != 0 }
+        regs().lsr.is_set(Lsr::DR)
     }
 
     /// 中断驱动 RX 的 poll 原语（override）。
@@ -146,13 +170,11 @@ impl Driver for Ns16550a {
         BASE.store(base, Ordering::Release);
 
         // 使能 FIFO + 清 FIFO + 开 RX 中断。
-        let base_ptr = base as *mut u8;
-        unsafe {
-            core::ptr::write_volatile(base_ptr.add(IIR_FCR), FCR_ENABLE | FCR_CLR_RX | FCR_CLR_TX);
-            core::ptr::write_volatile(base_ptr.add(IER), IER_ERBFI);
-            // 8N1 模式（DLAB=0 时 LCR 设为 0x03）。
-            core::ptr::write_volatile(base_ptr.add(LCR), 0x03);
-        }
+        let r = regs();
+        r.iir_fcr.write(Fcr::ENABLE::SET + Fcr::CLR_RX::SET + Fcr::CLR_TX::SET);
+        r.ier.write(Ier::ERBFI::SET);
+        // 8N1 模式（DLAB=0 时 LCR 设为 WLEN8）。
+        r.lcr.write(Lcr::WLEN8::SET);
 
         // 复位环形缓冲区索引。
         RX.head.store(0, Ordering::Release);
