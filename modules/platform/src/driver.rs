@@ -28,7 +28,9 @@ use core::mem::MaybeUninit;
 use fdt_parser::Fdt;
 use portable_atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::device::{Driver, InterruptController, Ipi, PinController, Reset, Serial, Timer};
+use crate::device::{
+    ClockProvider, Driver, InterruptController, Ipi, PinController, Reset, Serial, Timer,
+};
 
 /// 未初始化。
 const STATE_UNINIT: u8 = 0;
@@ -149,6 +151,12 @@ pub static DRIVERS: Slot<&'static [&'static dyn Driver]> = Slot::new();
 /// [`PinController::apply`] 应用 `pinctrl-0` 引脚配置。
 pub static PINCTRL: Slot<&'static dyn PinController> = Slot::new();
 
+/// 时钟控制器（板级 CCU）。driver 的 probe 中 `CLOCK.set(...)` 注入。
+/// boot() 遍历 DT 时对每个外设节点在 probe 前（pinctrl 之后）调
+/// [`ClockProvider::enable_for`] 使能功能时钟。板级不注册时返回 None，
+/// boot 容错跳过（如 QEMU virt）。
+pub static CLOCK: Slot<&'static dyn ClockProvider> = Slot::new();
+
 /// 串口设备注册表（多实例）。driver 的 probe 经 [`DeviceRegistry::register`] 登记，
 /// `try_derive_console` 据 chosen 从中选出默认 console。
 ///
@@ -207,6 +215,16 @@ pub fn try_pinctrl() -> Option<&'static dyn PinController> {
     PINCTRL.get().copied()
 }
 
+/// 取时钟控制器，未就绪时返回 `None`（不 panic）。
+///
+/// 供 [`boot`] 在 DFS 循环中调用——CCU 节点先于外设节点被 probe
+/// （DFS 先序），外设 probe 时 CLOCK 已就绪；但 CCU controller 自身
+/// probe 时返回 `None`（它就是自己在被 probe）。板级未注册 CCU 时
+/// （如 QEMU virt）始终返回 None，boot 容错跳过时钟使能。
+pub fn try_clock() -> Option<&'static dyn ClockProvider> {
+    CLOCK.get().copied()
+}
+
 /// 遍历设备树实例化所有 driver。
 ///
 /// 在 `init_dtb` 之后、调度器启动之前由板级 `board_init` 调用。
@@ -242,6 +260,13 @@ pub fn boot() {
         // 的节点（含 pinctrl controller 自身）apply 为 no-op。
         if let Some(pc) = try_pinctrl() {
             pc.apply(&node);
+        }
+        // 使能功能时钟：在 pinctrl 之后、driver probe 之前。
+        // CCU controller 节点先于外设节点被 probe（DFS 先序），此时
+        // CLOCK slot 已就绪；无 clocks 属性的节点 enable_for 为 no-op。
+        // 板级未注册 CCU（如 QEMU virt）时 try_clock() 返回 None，跳过。
+        if let Some(cc) = try_clock() {
+            cc.enable_for(&node);
         }
         // 对每个 driver 检查节点的 compatible 列表是否有任一命中。
         // node.compatibles() 迭代器每次调用都从头开始，无需收集到栈缓冲，
