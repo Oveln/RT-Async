@@ -28,7 +28,9 @@ use core::mem::MaybeUninit;
 use fdt_parser::Fdt;
 use portable_atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use crate::device::{ClockProvider, Driver, InterruptController, Ipi, PinController, Reset, Serial, Timer};
+use crate::device::{
+    ClockProvider, Driver, InterruptController, Ipi, PinController, Reset, Serial, Timer,
+};
 
 /// 未初始化。
 const STATE_UNINIT: u8 = 0;
