@@ -104,6 +104,23 @@ pub trait PinController: Send + Sync {
     fn apply(&self, node: &Node<'_>);
 }
 
+/// 时钟控制器功能（板级 CCU 实现）。
+///
+/// controller driver 实现，经 probe 注册进 [`crate::driver::CLOCK`] 全局槽。
+/// [`crate::driver::boot`] 遍历 DT 时，对每个节点在 driver probe 之前、
+/// 应用 pinctrl-0 之后调用 [`ClockProvider::enable_for`]，使外设功能时钟
+/// 与复位释放在驱动看到硬件前就绪。
+///
+/// 实现侧解析节点的 `clocks` 属性，写对应的 gate/mux/div 寄存器并释放
+/// 外设复位。无 clocks 配置的节点调用为 no-op。
+///
+/// 这是 consumer 语义的抽象：trait 只表达"为节点使能时钟"，寄存器细节
+/// 留在板级实现（K3 写 RCPU CCU 寄存器，QEMU virt 不注册，boot 容错跳过）。
+pub trait ClockProvider: Send + Sync {
+    /// 为给定外设节点使能功能时钟并释放复位。无 clocks 属性则 no-op。
+    fn enable_for(&self, node: &Node<'_>);
+}
+
 /// I2C 总线控制器功能。
 ///
 /// controller driver 实现，经 [`crate::bus`] 注册进 `I2C_BUSES`；
