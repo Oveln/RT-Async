@@ -38,6 +38,7 @@ pub use device::{
     Serial, SerialRxStatus, SpiBus, SpiError, Timer,
 };
 pub use driver::{boot, console, intctl, ipi, reset, timer, try_clock, try_console, DeviceRegistry, Slot};
+pub use irq::{IrqFuture, IrqLatch};
 pub use irq::{dispatch_external, register_irq, IrqHandler};
 // 消费方：未来 i2c/spi controller + child driver。
 #[allow(unused_imports)]

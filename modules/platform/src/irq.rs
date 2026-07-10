@@ -22,8 +22,11 @@
 //! 强制生成强符号接管；MachineTimer（定时器队列）由 `#[executor::interrupt]`
 //! 提供。两者均为单用途中断，无需 run-time 分发。
 
-use core::mem;
-use portable_atomic::{AtomicUsize, Ordering};
+use core::cell::UnsafeCell;
+use core::mem::{self, MaybeUninit};
+use core::task::{Context, Poll, Waker};
+
+use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// 最大 IRQ 号 + 1。K3 Mailbox 中断号最高 69（+ 安全余量 → 96）。
 pub const MAX_IRQ: usize = 96;
@@ -73,4 +76,130 @@ pub fn dispatch_external() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn __rt_machine_external(_tf: &mut crate::arch::TrapFrame) {
     dispatch_external();
+}
+
+// ── IrqLatch：通用的 ISR→async task 桥接原语 ──────────────────────
+
+/// 通用的中断通知锁存器——任意驱动复用的 await-IRQ 基础设施。
+///
+/// 一个 `IrqLatch` 实例绑定一个中断源。ISR 侧调 [`IrqLatch::notify`] 置位
+/// pending 并唤醒等待者；async 侧经 [`IrqLatch::poll`] 注册 waker，中断到达后
+/// 被唤醒重新 poll 返回 `Ready`。
+///
+/// ## 竞态修复
+///
+/// 采用与 `serial_ns16550a::rx_register_waker` 相同的"关中断→注册→重检→
+/// 开中断"模式，消除 ISR 在注册 waker 前后触发的竞态：
+///
+/// 1. 关中断（`disable_interrupts`）
+/// 2. 写入 waker，置 `has_waker = true`
+/// 3. 重检 pending——若 ISR 在关中断前已到达，立即消费
+/// 4. 开中断（`enable_interrupts`），返回 `Pending`
+///
+/// ## 约束
+///
+/// 仅 riscv64 可用——依赖 `arch` 关/开中断原语。
+pub struct IrqLatch {
+    pending: AtomicBool,
+    has_waker: AtomicBool,
+    waker: UnsafeCell<MaybeUninit<Waker>>,
+}
+
+// SAFETY: 并发安全靠原子状态 + 关中断临界区保证：
+// - pending/has_waker 是 AtomicBool，原子读写。
+// - waker 槽的写只发生在关中断临界区内（poll 侧）或 ISR 上下文（关中断），
+//   读发生在 ISR 的 notify（关中断），单写者单读者互斥。
+unsafe impl Sync for IrqLatch {}
+
+impl IrqLatch {
+    /// 创建空锁存器（pending=false，无 waker）。
+    pub const fn new() -> Self {
+        Self {
+            pending: AtomicBool::new(false),
+            has_waker: AtomicBool::new(false),
+            waker: UnsafeCell::new(MaybeUninit::uninit()),
+        }
+    }
+
+    /// ISR 侧：置位 pending 并唤醒等待者（若有）。
+    ///
+    /// 在中断上下文调用（关中断执行）。`has_waker` 的 `swap(false, AcqRel)`
+    /// 原子地消费 waker 槽，保证 poll 与 notify 不会并发访问 waker。
+    pub fn notify(&self) {
+        self.pending.store(true, Ordering::Release);
+        if self.has_waker.swap(false, Ordering::AcqRel) {
+            // SAFETY: has_waker=true 保证 waker 槽已初始化；
+            // swap 已原子消费标志，此处独占访问。
+            unsafe {
+                let waker = (*self.waker.get()).assume_init_read();
+                waker.wake();
+            }
+        }
+    }
+
+    /// async 侧：检查 pending，未就绪则注册 waker 等待下次中断。
+    ///
+    /// 返回 `Poll::Ready(())` 表示有中断到达（pending 被消费）；
+    /// `Poll::Pending` 表示已注册 waker，等待 ISR 唤醒。
+    ///
+    /// 仅 riscv64 可用。
+    #[cfg(feature = "riscv64")]
+    pub fn poll(&self, cx: &mut Context<'_>) -> Poll<()> {
+        // 快速路径：已有 pending。
+        if self.pending.swap(false, Ordering::AcqRel) {
+            return Poll::Ready(());
+        }
+
+        // 关中断 → 注册 waker → 重检 → 开中断。
+        unsafe { crate::arch::disable_interrupts() };
+        // SAFETY: 关中断临界区。
+        unsafe {
+            if self.has_waker.load(Ordering::Relaxed) {
+                (*self.waker.get()).assume_init_drop();
+            }
+            (*self.waker.get()).write(cx.waker().clone());
+        }
+        self.has_waker.store(true, Ordering::Release);
+
+        // 重检——ISR 可能在关中断前已调 notify。
+        if self.pending.swap(false, Ordering::AcqRel) {
+            self.has_waker.store(false, Ordering::Relaxed);
+            unsafe {
+                (*self.waker.get()).assume_init_drop();
+            }
+            unsafe { crate::arch::enable_interrupts() };
+            return Poll::Ready(());
+        }
+
+        unsafe { crate::arch::enable_interrupts() };
+        Poll::Pending
+    }
+}
+
+/// `Future` 包裹一个 [`IrqLatch`] 的引用。
+///
+/// 每完成一次表示一次中断到达。可反复 poll（循环 await 收割中断）。
+///
+/// ```ignore
+/// let latch = IrqLatch::new();
+/// // ISR 中: latch.notify();
+/// IrqFuture(&latch).await;
+/// ```
+#[cfg(feature = "riscv64")]
+pub struct IrqFuture<'a>(&'a IrqLatch);
+
+#[cfg(feature = "riscv64")]
+impl<'a> IrqFuture<'a> {
+    pub fn new(latch: &'a IrqLatch) -> Self {
+        Self(latch)
+    }
+}
+
+#[cfg(feature = "riscv64")]
+impl<'a> core::future::Future for IrqFuture<'a> {
+    type Output = ();
+
+    fn poll(self: core::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        self.0.poll(cx)
+    }
 }
