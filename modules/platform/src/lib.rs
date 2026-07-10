@@ -34,8 +34,8 @@ pub use logger::Logger;
 
 // 便捷 re-export：上层（executor / futures / apps）直接取用。
 pub use device::{
-    ClockProvider, Driver, I2cBus, I2cError, I2cMsg, InterruptController, Ipi, Reset, Serial,
-    SerialRxStatus, SpiBus, SpiError, Timer,
+    ClockProvider, Driver, I2cBus, I2cError, I2cMsg, InterruptController, Ipi, Mailbox, Reset,
+    Serial, SerialRxStatus, SpiBus, SpiError, Timer,
 };
 pub use driver::{boot, console, intctl, ipi, reset, timer, try_clock, try_console, DeviceRegistry, Slot};
 pub use irq::{dispatch_external, register_irq, IrqHandler};
