@@ -4,6 +4,7 @@
 
 ## 文章列表
 
+- [K3 COM260 Kit 刷机流程：FIT 单文件烧录 + 可编辑设备树](./2026-08-01-K3-COM260Kit-FIT烧录与可编辑设备树.md) (2026-08-01)
 - [驱动架构完善：SerialRx 解耦 + Slot/DeviceRegistry + chosen 派生 + bus 抽象](./2026-07-09-驱动架构完善.md) (2026-07-09)
 - [K3 RT24 rcpu1：从 Chip 硬编码到 Board + Driver Model](./2026-07-09-K3-RT24-driver-model适配.md) (2026-07-09)
 - [rt-async 驱动架构现代化：设备树 handoff + Driver Model](./2026-07-08-driver-model与DTB-handoff现代化.md) (2026-07-08)
