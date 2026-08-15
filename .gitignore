@@ -5,3 +5,6 @@ blogs/.vitepress/dist
 
 # DTB 是 .dts 的编译产物（build.rs 用 dtc 生成），不追踪
 *.dtb
+
+# ZCode/Omo 会话元数据目录
+.omo
