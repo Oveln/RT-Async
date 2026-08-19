@@ -23,8 +23,15 @@ impl Logger {
     }
 
     pub fn init(&'static self, max_level: LevelFilter) -> Result<(), SetLoggerError> {
-        log::set_logger(self)?;
-        log::set_max_level(max_level);
+        // racy 版本：set_logger/set_max_level 被 log 门控在
+        // target_has_atomic=ptr（CAS）之后，K3 专属 target
+        // （atomic-cas:false）下不可用。本 init 仅在 Board::init 调用
+        // （单 hart、开中断与任务启动之前），无并发初始化/日志竞争。
+        // SAFETY: 见上——单线程 boot 上下文。
+        unsafe {
+            log::set_logger_racy(self)?;
+            log::set_max_level_racy(max_level);
+        }
         Ok(())
     }
 }

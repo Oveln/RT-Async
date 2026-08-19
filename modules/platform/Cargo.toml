@@ -15,3 +15,9 @@ tock-registers = "0.10"
 
 [features]
 riscv64 = ["dep:riscv64-rt", "dep:riscv", "riscv64-rt/clear_bss"]
+# 单核原子后端（K3 X100），机制与 soundness 依据见 executor 同名 feature：
+# 配合主仓 atomic-cas:false 专属 target，RMW 经 critical-section 回退
+# （mstatus MIE 屏蔽 ~90ns/笔 vs 原生 AMO ~2.2µs/笔）；标准 target 上
+# 别名 core 原生，QEMU 零变化。IrqLatch 的 pending/has_waker 是每次
+# 中断唤醒路径。共享窗跨核原子不经此路径。
+cs-atomics = ["portable-atomic/critical-section"]

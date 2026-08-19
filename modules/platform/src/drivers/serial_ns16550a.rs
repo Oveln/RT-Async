@@ -13,7 +13,8 @@
 
 use core::cell::UnsafeCell;
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
+use portable_atomic::AtomicU8 as AtomicWakerFlag;
 use core::task::Waker;
 
 use fdt_parser::Node;
@@ -131,16 +132,16 @@ impl Serial for Ns16550a {
         unsafe { crate::arch::disable_interrupts() };
         // SAFETY: 关中断临界区。
         unsafe {
-            if RX.has_waker.load(Ordering::Relaxed) {
+            if RX.has_waker.load(Ordering::Relaxed) != 0 {
                 (*RX.waker.get()).assume_init_drop();
             }
             (*RX.waker.get()).write(cx.waker().clone());
         }
-        RX.has_waker.store(true, Ordering::Release);
+        RX.has_waker.store(1, Ordering::Release);
 
         // 重检——ISR 可能在注册 waker 前已推入字节。
         if let Some(byte) = rx_pop() {
-            RX.has_waker.store(false, Ordering::Relaxed);
+            RX.has_waker.store(0, Ordering::Relaxed);
             unsafe {
                 (*RX.waker.get()).assume_init_drop();
             }
@@ -199,7 +200,7 @@ struct RxState {
     /// 环形缓冲区存储。
     buf: UnsafeCell<[u8; RX_BUF_SIZE]>,
     /// Waker 槽占用标记。
-    has_waker: AtomicBool,
+    has_waker: AtomicWakerFlag,
     /// Waker 槽。
     waker: UnsafeCell<MaybeUninit<Waker>>,
 }
@@ -213,7 +214,7 @@ static RX: RxState = RxState {
     head: AtomicU16::new(0),
     tail: AtomicU16::new(0),
     buf: UnsafeCell::new([0; RX_BUF_SIZE]),
-    has_waker: AtomicBool::new(false),
+    has_waker: AtomicWakerFlag::new(0),
     waker: UnsafeCell::new(MaybeUninit::uninit()),
 };
 
@@ -255,7 +256,7 @@ fn rx_pop() -> Option<u8> {
 
 /// ISR 在 RX 完成时调用的唤醒通知。原子消费已注册的 Waker。
 fn rx_wake() {
-    if RX.has_waker.swap(false, Ordering::AcqRel) {
+    if RX.has_waker.swap(0, Ordering::AcqRel) != 0 {
         // SAFETY: consume 已注册的 Waker。has_waker==true 确保 Waker 槽有效。
         unsafe {
             let waker = (*RX.waker.get()).assume_init_read();

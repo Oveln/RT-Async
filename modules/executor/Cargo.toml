@@ -14,6 +14,15 @@ log = { version = "0.4", default-features = false }
 
 [features]
 std = ["critical-section/std"]
+# 单核原子后端（K3 X100）：配合主仓 targets/riscv64imac-k3-none-elf.json
+# （atomic-cas:false——core 原生 RMW 在该 target 上被 cfg 掉，portable-atomic
+# 落入 critical-section 回退 = riscv crate 单 hart mstatus MIE 屏蔽 + 普通
+# 访存，板上实测 ~90ns/笔；标准 target 上 portable-atomic 别名 core 原生
+# AMO，QEMU 行为零变化）。原生 AMO 在 X100 经 Atomics Wrapper 序列化实测
+# ~2.2µs/笔（2026-08 延迟归因战役，任务状态机/IrqLatch 是每消息路径）。
+# soundness：本 crate 原子均为本核本地数据（任务状态、唤醒锁存），
+# 非 跨核共享——跨核数据走 ov-channels 的 core 原生 load/store。
+cs-atomics = ["portable-atomic/critical-section"]
 
 [dev-dependencies]
 std-chip = { path = "../platform/chips/std-chip" }

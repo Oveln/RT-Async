@@ -26,7 +26,7 @@ use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::task::{Context, Poll, Waker};
 
-use portable_atomic::{AtomicBool, AtomicUsize, Ordering};
+use portable_atomic::{AtomicU8, AtomicUsize, Ordering};
 
 /// 最大 IRQ 号 + 1。K3 Mailbox 中断号最高 69（+ 安全余量 → 96）。
 pub const MAX_IRQ: usize = 96;
@@ -100,13 +100,16 @@ pub unsafe extern "C" fn __rt_machine_external(_tf: &mut crate::arch::TrapFrame)
 ///
 /// 仅 riscv64 可用——依赖 `arch` 关/开中断原语。
 pub struct IrqLatch {
-    pending: AtomicBool,
-    has_waker: AtomicBool,
+    // AtomicU8（0/1）而非 AtomicBool：portable-atomic 的 critical-section
+    // 后端（K3 专属 atomic-cas:false target）不为 AtomicBool 提供 RMW——
+    // 定宽类型的 swap 走 mstatus MIE 屏蔽 + 普通访存。
+    pending: AtomicU8,
+    has_waker: AtomicU8,
     waker: UnsafeCell<MaybeUninit<Waker>>,
 }
 
 // SAFETY: 并发安全靠原子状态 + 关中断临界区保证：
-// - pending/has_waker 是 AtomicBool，原子读写。
+// - pending/has_waker 是 AtomicU8（0/1 语义），原子读写。
 // - waker 槽的写只发生在关中断临界区内（poll 侧）或 ISR 上下文（关中断），
 //   读发生在 ISR 的 notify（关中断），单写者单读者互斥。
 unsafe impl Sync for IrqLatch {}
@@ -115,8 +118,8 @@ impl IrqLatch {
     /// 创建空锁存器（pending=false，无 waker）。
     pub const fn new() -> Self {
         Self {
-            pending: AtomicBool::new(false),
-            has_waker: AtomicBool::new(false),
+            pending: AtomicU8::new(0),
+            has_waker: AtomicU8::new(0),
             waker: UnsafeCell::new(MaybeUninit::uninit()),
         }
     }
@@ -126,8 +129,8 @@ impl IrqLatch {
     /// 在中断上下文调用（关中断执行）。`has_waker` 的 `swap(false, AcqRel)`
     /// 原子地消费 waker 槽，保证 poll 与 notify 不会并发访问 waker。
     pub fn notify(&self) {
-        self.pending.store(true, Ordering::Release);
-        if self.has_waker.swap(false, Ordering::AcqRel) {
+        self.pending.store(1, Ordering::Release);
+        if self.has_waker.swap(0, Ordering::AcqRel) != 0 {
             // SAFETY: has_waker=true 保证 waker 槽已初始化；
             // swap 已原子消费标志，此处独占访问。
             unsafe {
@@ -146,7 +149,7 @@ impl IrqLatch {
     #[cfg(feature = "riscv64")]
     pub fn poll(&self, cx: &mut Context<'_>) -> Poll<()> {
         // 快速路径：已有 pending。
-        if self.pending.swap(false, Ordering::AcqRel) {
+        if self.pending.swap(0, Ordering::AcqRel) != 0 {
             return Poll::Ready(());
         }
 
@@ -154,16 +157,16 @@ impl IrqLatch {
         unsafe { crate::arch::disable_interrupts() };
         // SAFETY: 关中断临界区。
         unsafe {
-            if self.has_waker.load(Ordering::Relaxed) {
+            if self.has_waker.load(Ordering::Relaxed) != 0 {
                 (*self.waker.get()).assume_init_drop();
             }
             (*self.waker.get()).write(cx.waker().clone());
         }
-        self.has_waker.store(true, Ordering::Release);
+        self.has_waker.store(1, Ordering::Release);
 
         // 重检——ISR 可能在关中断前已调 notify。
-        if self.pending.swap(false, Ordering::AcqRel) {
-            self.has_waker.store(false, Ordering::Relaxed);
+        if self.pending.swap(0, Ordering::AcqRel) != 0 {
+            self.has_waker.store(0, Ordering::Relaxed);
             unsafe {
                 (*self.waker.get()).assume_init_drop();
             }

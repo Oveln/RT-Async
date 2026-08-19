@@ -12,9 +12,10 @@ use core::mem::MaybeUninit;
 use core::ptr::addr_of_mut;
 
 use fdt_parser::Fdt;
-use portable_atomic::{AtomicBool, Ordering};
+use portable_atomic::{AtomicU8, Ordering};
 
-static INITED: AtomicBool = AtomicBool::new(false);
+#[allow(clippy::redundant_static_lifetimes)]
+static INITED: AtomicU8 = AtomicU8::new(0);
 static mut FDT: MaybeUninit<Fdt<'static>> = MaybeUninit::uninit();
 
 /// 注入 DTB 切片。由板级 `board_init` 调用，来源不限（内嵌/扫描/handoff）。
@@ -23,7 +24,7 @@ static mut FDT: MaybeUninit<Fdt<'static>> = MaybeUninit::uninit();
 /// `dtb` 必须是合法的 FDT blob，且在程序生命周期内有效（'static）。
 /// 解析失败或重复初始化都会 panic（板级描述损坏 / 重复 board_init 属致命错误）。
 pub fn init_dtb(dtb: &'static [u8]) {
-    if INITED.swap(true, Ordering::SeqCst) {
+    if INITED.swap(1, Ordering::SeqCst) != 0 {
         panic!("init_dtb: already initialized");
     }
 
@@ -42,7 +43,7 @@ pub fn init_dtb(dtb: &'static [u8]) {
 /// # Panics
 /// 若 [`init_dtb`] 尚未调用则 panic。
 pub fn dt() -> &'static Fdt<'static> {
-    if !INITED.load(Ordering::Acquire) {
+    if INITED.load(Ordering::Acquire) == 0 {
         panic!("dt() called before init_dtb()");
     }
     // SAFETY: INITED 为真保证 FDT 已被写入。使用 addr_of_mut! 取裸指针避免
